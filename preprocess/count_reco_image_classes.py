@@ -7,7 +7,6 @@ from array import array
 
 parser = argparse.ArgumentParser("Count Reco Prong CNN Image Classes")
 parser.add_argument("-f", "--infile", required=True, type=str, help="input prongCNN images root file")
-parser.add_argument("-p", "--minPurity", type=float, default=0.6, help="minimum prong purity for inclusion in output")
 args = parser.parse_args()
 
 f = rt.TFile(args.infile)
@@ -53,6 +52,10 @@ domPartPDG = array('i', [0])
 prongTree.Branch("domPartPDG", domPartPDG, 'domPartPDG/I')
 domPartPurity = array('f', [0.])
 prongTree.Branch("domPartPurity", domPartPurity, 'domPartPurity/F')
+pdg = array('i', [0])
+prongTree.Branch("pdg", pdg, 'pdg/I')
+purity = array('f',[0.])
+prongTree.Branch("purity", purity, 'purity/F')
 
 nProngs = 0
 classCounters = [0,0,0,0,0,0]
@@ -87,6 +90,8 @@ for e in range(t.GetEntries()):
   puritySum5Class[0] = pSum5Class
   domPartPDG[0] = pMaxPDG
   domPartPurity[0] = pMax
+  pdg[0] = t.pdg
+  purity[0] = t.purity
   prongTree.Fill()
   nProngs += 1
 
