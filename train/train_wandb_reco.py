@@ -45,8 +45,8 @@ parser.add_argument("-l", "--learning_rate", type=float, default=1e-3, help="lea
 parser.add_argument("-e", "--epochs", type=int, default=10, help="number of training epochs")
 parser.add_argument("-p", "--plot_tag", type=str, default="prongCNN", help="tag for output plots")
 parser.add_argument("-m", "--model_path", type=str, default="/home/mrosenberg/prongCNN/ResNet34_recoProng_b32_plAll.pt", help="model name")
-parser.add_argument("--soft5class", action="store_true", help="use 5 class soft labels")
-parser.add_argument("--hard5class", action="store_true", help="use 5 class hard labels")
+parser.add_argument("--use6class", action="store_true", help="use 6 classes (include other label)")
+parser.add_argument("--softLabels", action="store_true", help="use soft labels for loss")
 parser.add_argument("--noMask", action="store_true", help="only use prong pixels")
 parser.add_argument("--dropLast", action="store_true", help="drop the last training batch in every epoch")
 parser.add_argument("--plane2only", action="store_true", help="only use collection plane images")
@@ -64,12 +64,17 @@ else:
   print("invalid input for --l0inChans (-c) option")
   sys.exit()
 
-if args.soft5class or args.hard5class:
-    from datasets_reco_5ClassSoftLabel import ProngDataset, ProngDatasetPl2, mean, std, meanPl2, stdPl2, ProngDatasetNoMask, ProngDatasetPl2NoMask, mean_nm, std_nm, meanPl2_nm, stdPl2_nm
-    nClasses = 5
-else:
+if args.use6class and args.softLabels:
+  sys.exit("modules not configured for 6 class soft labels")
+
+nClasses = 5
+if args.use6class:
     from datasets_reco import ProngDataset, ProngDatasetPl2, mean, std, meanPl2, stdPl2, ProngDatasetNoMask, ProngDatasetPl2NoMask, mean_nm, std_nm, meanPl2_nm, stdPl2_nm
     nClasses = 6
+elif args.softLabels:
+    from datasets_reco_5ClassSoftLabel import ProngDataset, ProngDatasetPl2, mean, std, meanPl2, stdPl2, ProngDatasetNoMask, ProngDatasetPl2NoMask, mean_nm, std_nm, meanPl2_nm, stdPl2_nm
+else:
+    from datasets_reco_5ClassHardLabel import ProngDataset, ProngDatasetPl2, mean, std, meanPl2, stdPl2, ProngDatasetNoMask, ProngDatasetPl2NoMask, mean_nm, std_nm, meanPl2_nm, stdPl2_nm
 
 layer0inChans = args.l0inChans
 if args.noMask:
@@ -202,7 +207,7 @@ def test(dataloader, model, loss_fn, n_batches=-1):
                 break
             if tstep % 100 == 0:
                 print("reached validation batch %i of %i"%(tstep, testSteps), flush=True)
-            if args.soft5class or args.hard5class:
+            if args.softLabels:
                 target = y
                 y = y.argmax(1)
                 target = target.to(args.device)
@@ -228,7 +233,7 @@ def test(dataloader, model, loss_fn, n_batches=-1):
             total_pr += y[iPr].size(dim=0)
             total_o += y[iOt].size(dim=0)
 
-            if args.soft5class:
+            if args.softLabels:
                 totalTestLoss += softNLLLoss(pred, target)
             else:
                 totalTestLoss += loss_fn(pred, y)
@@ -278,7 +283,7 @@ def train(train_dataloader, test_dataloader, model, loss_fn, optimizer, step, ep
     start = time.time()
     for batch, (X,y) in enumerate(train_dataloader):
         dataloading_time += time.time() - start
-        if args.soft5class or args.hard5class:
+        if args.softLabels:
             target = y
             y = y.argmax(1)
             target = target.to(args.device)
@@ -286,7 +291,7 @@ def train(train_dataloader, test_dataloader, model, loss_fn, optimizer, step, ep
             y = y.type(torch.LongTensor)
         X, y = X.to(args.device), y.to(args.device)
         pred = model(X)
-        if args.soft5class:
+        if args.softLabels:
             loss = softNLLLoss(pred, target)
         else:
             loss = loss_fn(pred, y)
@@ -306,15 +311,15 @@ def train(train_dataloader, test_dataloader, model, loss_fn, optimizer, step, ep
         if step % args.log_frequency == 0:
             print("reached training batch %i of %i"%(step, trainSteps), flush=True)
             valLoss, valAcc, valAcc_e, valAcc_ph, valAcc_mu, valAcc_pi, valAcc_pr, valAcc_o = test(test_dataloader, model, loss_fn, args.n_val_batches)
-            if args.soft5class or args.hard5class:
-                wandb.log({"train_loss": loss, "train_acc": batchAcc, "val_loss": valLoss, "val_acc": valAcc,
-                           "val_electron_acc": valAcc_e, "val_photon_acc": valAcc_ph, "val_muon_acc": valAcc_mu,
-                           "val_pion_acc": valAcc_pi, "val_proton_acc": valAcc_pr, "epoch": epoch, "step": step})
-            else:
+            if args.use6class:
                 wandb.log({"train_loss": loss, "train_acc": batchAcc, "val_loss": valLoss, "val_acc": valAcc,
                            "val_electron_acc": valAcc_e, "val_photon_acc": valAcc_ph, "val_muon_acc": valAcc_mu,
                            "val_pion_acc": valAcc_pi, "val_proton_acc": valAcc_pr, "val_other_acc": valAcc_o, 
                            "epoch": epoch, "step": step})
+            else:
+                wandb.log({"train_loss": loss, "train_acc": batchAcc, "val_loss": valLoss, "val_acc": valAcc,
+                           "val_electron_acc": valAcc_e, "val_photon_acc": valAcc_ph, "val_muon_acc": valAcc_mu,
+                           "val_pion_acc": valAcc_pi, "val_proton_acc": valAcc_pr, "epoch": epoch, "step": step})
             model.train()
 
         step += 1
