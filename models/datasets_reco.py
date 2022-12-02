@@ -17,6 +17,7 @@ meanPl2_nm = 50.5312
 stdPl2_nm = 42.0027
 
 def getClass(pid, purity):
+  pid = abs(pid)
   if purity < 0.6:
     return 5
   if pid == 11:

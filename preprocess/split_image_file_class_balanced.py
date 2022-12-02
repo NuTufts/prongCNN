@@ -8,15 +8,16 @@ parser = argparse.ArgumentParser("Split Prong CNN Training File into Class Balan
 parser.add_argument("-f", "--infile", required=True, type=str, help="prongCNN images root file")
 parser.add_argument("-nT", "--nTrain", type=int, default=10000, help="number of particles per class to write to training file")
 parser.add_argument("-nV", "--nTest", type=int, default=2000, help="number of particles per class to write to validation file")
+parser.add_argument("-t", "--newSampleTag", type=str, default="8KPerClass", help="new sample size tag")
 args = parser.parse_args()
 
 f_orig = rt.TFile(args.infile)
 t_orig = f_orig.Get("ImageTree")
 
-f_train = rt.TFile(args.infile.replace(".root","_train.root").replace("largeSample","12KPerClass"), "RECREATE")
+f_train = rt.TFile(args.infile.replace(".root","_train.root").replace("largeSample",args.newSampleTag), "RECREATE")
 t_train = t_orig.CloneTree(0)
 
-f_test = rt.TFile(args.infile.replace(".root","_test.root").replace("largeSample","12KPerClass"), "RECREATE")
+f_test = rt.TFile(args.infile.replace(".root","_test.root").replace("largeSample",args.newSampleTag), "RECREATE")
 t_test = t_orig.CloneTree(0)
 
 
@@ -53,7 +54,7 @@ for e in range(n_entries):
   if countersFull(classCountersTrain, args.nTrain) and countersFull(classCountersTest, args.nTest):
     break
 
-  classID = getClass(t_orig.pdg)
+  classID = getClass(abs(t_orig.pdg))
 
   if classCountersTrain[classID] < args.nTrain:
     t_train.Fill()

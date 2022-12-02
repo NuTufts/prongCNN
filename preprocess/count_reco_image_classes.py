@@ -66,13 +66,13 @@ puritySumGr1 = 0
 
 for e in range(t.GetEntries()):
   t.GetEntry(e)
-  classCounters[getClass(t.pdg, t.purity)] += 1
+  classCounters[getClass(abs(t.pdg), t.purity)] += 1
   pSum = 0.
   pSum5Class = 0.
   pMax = -1.
   pMaxPDG = 0
   for i in range(t.nParticles):
-    pidClass = getPIDClass(t.pdgs[i])
+    pidClass = getPIDClass(abs(t.pdgs[i]))
     pidClassCounters[pidClass] += 1
     pSum += t.purities[i]
     if pidClass < 5:
