@@ -45,6 +45,7 @@ parser.add_argument("-l", "--learning_rate", type=float, default=1e-3, help="lea
 parser.add_argument("-e", "--epochs", type=int, default=10, help="number of training epochs")
 parser.add_argument("-p", "--plot_tag", type=str, default="prongCNN", help="tag for output plots")
 parser.add_argument("-m", "--model_path", type=str, default="/home/mrosenberg/prongCNN/ResNet34_recoProng_b32_plAll.pt", help="model name")
+parser.add_argument("-r", "--runName", type=str, default="DEFAULT", help="wandb run name")
 parser.add_argument("--use6class", action="store_true", help="use 6 classes (include other label)")
 parser.add_argument("--softLabels", action="store_true", help="use soft labels for loss")
 parser.add_argument("--noMask", action="store_true", help="only use prong pixels")
@@ -85,6 +86,9 @@ random.seed(0)
 np.random.seed(0)
 
 wandb.init(project="prongCNN-5particle-recoProngs")
+if args.runName != "DEFAULT":
+  wandb.run.name = args.runName
+  wandb.run.save()
 
 if args.plane2only:
     img_mean = meanPl2
@@ -205,7 +209,7 @@ def test(dataloader, model, loss_fn, n_batches=-1):
         for batch, (X, y) in enumerate(dataloader):
             if n_batches > 0 and tstep >= n_batches:
                 break
-            if tstep % 100 == 0:
+            if tstep % args.log_frequency == 0:
                 print("reached validation batch %i of %i"%(tstep, testSteps), flush=True)
             if args.softLabels:
                 target = y
