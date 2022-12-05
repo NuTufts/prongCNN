@@ -20,14 +20,14 @@ sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__)))+'/mo
 
 
 parser = argparse.ArgumentParser("evaluate Prong CNN")
-parser.add_argument("-i", "--images_file", type=str, default="images/prongCNN_reco_images_file_12KPerClass_wMasks_noCosmic_cleaned_minHit10_test.root", help="validation images file")
+parser.add_argument("-i", "--images_file", type=str, required=True, help="validation images file")
+parser.add_argument("-m", "--model_path", type=str, required=True, help="model name")
 parser.add_argument("-d", "--device", type=str, default="cuda", help="gpu/cpu device")
 parser.add_argument("-n", "--num_workers", type=int, default=12, help="number of cpu workers for data loading")
 parser.add_argument("-b", "--batch_size", type=int, default=1, help="validation batch size")
-parser.add_argument("-m", "--model_path", type=str, default="models_reco/12KPerClass_ResNet34_l0-2-in-channels_5ClassHardLabel/ResNet34_recoProng_b32_plAll_epoch9.pt", help="model name")
 parser.add_argument("-c", "--l0inChans", type=int, default=2, help="number of input channels for first conv layer")
-parser.add_argument("--soft5class", action="store_true", help="use 5 class soft labels")
-parser.add_argument("--hard5class", action="store_true", help="use 5 class hard labels")
+parser.add_argument("--use6class", action="store_true", help="use 6 classes (include other label)")
+parser.add_argument("--softLabels", action="store_true", help="use soft labels for loss")
 parser.add_argument("--noMask", action="store_true", help="only use prong pixels")
 parser.add_argument("--plane2only", action="store_true", help="only use collection plane images")
 parser.add_argument("--resnet18", action="store_true", help="use ResNet18 instead of ResNet34")
@@ -45,12 +45,17 @@ else:
   print("invalid input for --l0inChans (-c) option")
   sys.exit()
 
-if args.soft5class or args.hard5class:
-    from datasets_reco_5ClassSoftLabel import ProngDataset, ProngDatasetPl2, mean, std, meanPl2, stdPl2, ProngDatasetNoMask, ProngDatasetPl2NoMask, mean_nm, std_nm, meanPl2_nm, stdPl2_nm
-    nClasses = 5
-else:
+if args.use6class and args.softLabels:
+  sys.exit("modules not configured for 6 class soft labels")
+
+nClasses = 5
+if args.use6class:
     from datasets_reco import ProngDataset, ProngDatasetPl2, mean, std, meanPl2, stdPl2, ProngDatasetNoMask, ProngDatasetPl2NoMask, mean_nm, std_nm, meanPl2_nm, stdPl2_nm
     nClasses = 6
+elif args.softLabels:
+    from datasets_reco_5ClassSoftLabel import ProngDataset, ProngDatasetPl2, mean, std, meanPl2, stdPl2, ProngDatasetNoMask, ProngDatasetPl2NoMask, mean_nm, std_nm, meanPl2_nm, stdPl2_nm
+else:
+    from datasets_reco_5ClassHardLabel import ProngDataset, ProngDatasetPl2, mean, std, meanPl2, stdPl2, ProngDatasetNoMask, ProngDatasetPl2NoMask, mean_nm, std_nm, meanPl2_nm, stdPl2_nm
 
 layer0inChans = args.l0inChans
 if args.noMask:
@@ -144,7 +149,7 @@ def test(dataloader, model):
         for batch, (X, y) in enumerate(dataloader):
             if tstep % 1000 == 0:
                 print("reached validation batch %i of %i"%(tstep, testSteps), flush=True)
-            if args.soft5class or args.hard5class:
+            if args.softLabels:
                 y = y.argmax(1)
             else:
                 y = y.type(torch.LongTensor)
