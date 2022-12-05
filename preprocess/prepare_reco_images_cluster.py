@@ -98,11 +98,11 @@ def getMCProngParticle(sparseimg_vv, mcpg, mcpm, adc_v):
       maxPartNID = trackDict[track][1]
       maxPartTID = track
 
+  totNodePixI = 0.
   if maxPartI > 0.:
     maxPartNode = mcpg.node_v[maxPartNID]
     if maxPartNode.tid != maxPartTID:
       sys.exit("ERROR: mismatch between node track id from mcpm and mcpg in getMCProngParticle")
-    totNodePixI = 0.
     for p in range(3):
       pixels = maxPartNode.pix_vv[p]
       for iP in range(pixels.size()//2):
@@ -116,7 +116,46 @@ def getMCProngParticle(sparseimg_vv, mcpg, mcpm, adc_v):
     print("ERROR: prong completeness calculated to be >1")
 
   #return maxPartPDG, maxPartI/totalPixI, pdglist, puritylist
-  return maxPartPDG, maxPartTID, maxPartI/totalPixI, maxPartComp, pdglist, puritylist
+  return maxPartPDG, maxPartTID, totNodePixI, maxPartI/totalPixI, maxPartComp, pdglist, puritylist
+
+
+def checkCompleteness(flowTriples, adc_v, thrumu_v, prongCluster, cropPt, 
+                      mcpm, mcTID, truePixSum, bestComp):
+  prong_vv = flowTriples.make_cropped_initial_sparse_prong_image_reco(adc_v, thrumu_v,
+   prongCluster, cropPt, args.pixelThresh, args.pixelWH, args.pixelWH)
+  matchedSum = 0.
+  for p in range(3):
+    for pix in prong_vv[p]:
+      pixContents = mcpm.getPixContent(p, pix.rawRow, pix.rawCol)
+      for part in pixContents.particles:
+        if part.tid == mcTID:
+          matchedSum += pixContents.pixI
+  comp = matchedSum/truePixSum
+  if comp > bestComp:
+    return comp
+  return bestComp
+
+
+def getBestOtherCompleteness(vertices, vID, tID, sID, flowTriples, adc_v,
+                             thrumu_v, mcpm, mcTID, truePartPixSum):
+  bestComp = 0.
+
+  for iV, vertex in enumerate(vertices):
+    for iT, prongCluster in enumerate(vertex.track_hitcluster_v):
+      if iV == vID and iT == tID:
+        continue
+      cropPt = vertex.track_v[iT].End()
+      bestComp = checkCompleteness(flowTriples, adc_v, thrumu_v, prongCluster, cropPt,
+       mcpm, mcTID, truePartPixSum, bestComp)
+
+    for iS, prongCluster in enumerate(vertex.shower_v):
+      if iV == vID and iS == sID:
+        continue
+      cropPt = vertex.shower_trunk_v[iS].Vertex()
+      bestComp = checkCompleteness(flowTriples, adc_v, thrumu_v, prongCluster, cropPt, 
+       mcpm, mcTID, truePartPixSum, bestComp)
+
+  return bestComp
 
 
 def getTheta(mcstep):
@@ -153,12 +192,14 @@ cluster = array('i', [0])
 pdg = array('i', [0])
 purity = array('f', [0.])
 completeness = array('f', [0.])
+bestOtherComp = array('f', [0.])
 trueEnergy = array('f', [0.])
 trueTheta = array('f', [0.])
 nParticles = array('i', [0])
 pdgs = array('i', 10*[0])
 purities = array('f', 10*[0.])
 isShower = array('i', [0])
+max_plane_nPix = array('i', [0])
 plane0_nPix = array('i', [0])
 plane0pix_row = array('i', nPixels*[0])
 plane0pix_col = array('i', nPixels*[0])
@@ -191,12 +232,14 @@ imageTree.Branch("cluster", cluster, 'cluster/I')
 imageTree.Branch("pdg", pdg, 'pdg/I')
 imageTree.Branch("purity", purity, 'purity/F')
 imageTree.Branch("completeness", completeness, 'completeness/F')
+imageTree.Branch("bestOtherComp", bestOtherComp, 'bestOtherComp/F')
 imageTree.Branch("trueEnergy", trueEnergy, 'trueEnergy/F')
 imageTree.Branch("trueTheta", trueTheta, 'trueTheta/F')
 imageTree.Branch("nParticles", nParticles, 'nParticles/I')
 imageTree.Branch("pdgs", pdgs, 'pdgs[nParticles]/I')
 imageTree.Branch("purities", purities, 'purities[nParticles]/F')
 imageTree.Branch("isShower", isShower, 'isShower/I')
+imageTree.Branch("max_plane_nPix", max_plane_nPix, 'max_plane_nPix/I')
 imageTree.Branch("plane0_nPix", plane0_nPix, 'plane0_nPix/I')
 imageTree.Branch("plane0pix_row", plane0pix_row, 'plane0pix_row[plane0_nPix]/I')
 imageTree.Branch("plane0pix_col", plane0pix_col, 'plane0pix_col[plane0_nPix]/I')
@@ -334,7 +377,12 @@ for filepair in filepairs:
         continue
 
       #pdg[0], purity[0], pdglist, puritylist = getMCProngParticle(prong_vv, mcpm)
-      pdg[0], trackId, purity[0], completeness[0], pdglist, puritylist = getMCProngParticle(prong_vv, mcpg, mcpm, adc_v)
+      pdg[0], trackId, truePixSum, purity[0], completeness[0], pdglist, puritylist = getMCProngParticle(prong_vv, mcpg, mcpm, adc_v)
+      bestOtherComp[0] = 0.
+      if truePixSum > 0.:
+        bestOtherComp[0] = getBestOtherCompleteness(vertices, vertex[0], iT, -1,
+         flowTriples, adc_v, thrumu_v, mcpm, trackId, truePixSum)
+
       nParticles[0] = len(pdglist)
       for iTP in range(len(pdglist)):
         pdgs[iTP] = pdglist[iTP]
@@ -352,6 +400,7 @@ for filepair in filepairs:
         plane0pix_val[iP] = pix.val
         iP += 1
       plane0_nPix[0] = iP
+      max_plane_nPix[0] = iP
       iP = 0
       for pix in prong_vv[1]:
         plane1pix_row[iP] = pix.row
@@ -359,6 +408,8 @@ for filepair in filepairs:
         plane1pix_val[iP] = pix.val
         iP += 1
       plane1_nPix[0] = iP
+      if iP > max_plane_nPix[0]:
+        max_plane_nPix[0] = iP
       iP = 0
       for pix in prong_vv[2]:
         plane2pix_row[iP] = pix.row
@@ -366,6 +417,8 @@ for filepair in filepairs:
         plane2pix_val[iP] = pix.val
         iP += 1
       plane2_nPix[0] = iP
+      if iP > max_plane_nPix[0]:
+        max_plane_nPix[0] = iP
         
       iP = 0
       for pix in prong_vv[3]:
@@ -407,7 +460,12 @@ for filepair in filepairs:
         continue
 
       #pdg[0], purity[0], pdglist, puritylist = getMCProngParticle(prong_vv, mcpm)
-      pdg[0], trackId, purity[0], completeness[0], pdglist, puritylist = getMCProngParticle(prong_vv, mcpg, mcpm, adc_v)
+      pdg[0], trackId, truePixSum, purity[0], completeness[0], pdglist, puritylist = getMCProngParticle(prong_vv, mcpg, mcpm, adc_v)
+      bestOtherComp[0] = 0.
+      if truePixSum > 0.:
+        bestOtherComp[0] = getBestOtherCompleteness(vertices, vertex[0], -1, iS,
+         flowTriples, adc_v, thrumu_v, mcpm, trackId, truePixSum)
+
       nParticles[0] = len(pdglist)
       for iTP in range(len(pdglist)):
         pdgs[iTP] = pdglist[iTP]
@@ -425,6 +483,7 @@ for filepair in filepairs:
         plane0pix_val[iP] = pix.val
         iP += 1
       plane0_nPix[0] = iP
+      max_plane_nPix[0] = iP
       iP = 0
       for pix in prong_vv[1]:
         plane1pix_row[iP] = pix.row
@@ -432,6 +491,8 @@ for filepair in filepairs:
         plane1pix_val[iP] = pix.val
         iP += 1
       plane1_nPix[0] = iP
+      if iP > max_plane_nPix[0]:
+        max_plane_nPix[0] = iP
       iP = 0
       for pix in prong_vv[2]:
         plane2pix_row[iP] = pix.row
@@ -439,6 +500,8 @@ for filepair in filepairs:
         plane2pix_val[iP] = pix.val
         iP += 1
       plane2_nPix[0] = iP
+      if iP > max_plane_nPix[0]:
+        max_plane_nPix[0] = iP
         
       iP = 0
       for pix in prong_vv[3]:
