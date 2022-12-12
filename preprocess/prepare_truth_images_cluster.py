@@ -141,7 +141,7 @@ for filepair in filepairs:
         if abs(node.pid) not in [11,22,13,211,2212]:
           continue
 
-        prong_vv = flowTriples.make_cropped_initial_sparse_prong_image(adc_v, mcpg, ioll, node.tid, args.pixelThresh, args.pixelWH, args.pixelWH, abs(node.pid) in [11,22])
+        prong_vv = flowTriples.make_cropped_initial_sparse_prong_image_truth(adc_v, mcpg, ioll, node.tid, args.pixelThresh, args.pixelWH, args.pixelWH, abs(node.pid) in [11,22])
 
         skip = False
         for p in range(3):

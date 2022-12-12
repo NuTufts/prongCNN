@@ -25,6 +25,12 @@ parser.add_argument("-f", "--splitfrac", type=float, default=0.8, help="fraction
 args = parser.parse_args()
 
 
+sce = larutil.SpaceChargeMicroBooNE()
+mcNuVertexer = ublarcvapp.mctools.NeutrinoVertex()
+truthTrackSCE = ublarcvapp.mctools.TruthTrackSCE()
+truthShowerTrunkSCE = ublarcvapp.mctools.TruthShowerTrunkSCE()
+
+
 def getFiles(mdlTag, kpsfiles, mdlfiles):
   files = []
   for kpsfile in kpsfiles:
@@ -52,6 +58,15 @@ def isFiducial(p):
 def getDistance(a, b):
   return sqrt( (a.X() - b.X())**2 + (a.Y() - b.Y())**2 + (a.Z() - b.Z())**2)
 
+def getDistToEdge(p):
+  minDist = 1e6
+  edgeDists = [p.X() - detCrds[0][0], detCrds[0][1] - p.X(),
+               p.Y() - detCrds[1][0], detCrds[1][1] - p.Y(),
+               p.Z() - detCrds[2][0], detCrds[2][1] - p.Z()]
+  for dist in edgeDists:
+    if dist < minDist:
+      minDist = dist
+  return minDist
 
 def getMCProngParticle(sparseimg_vv, mcpg, mcpm, adc_v):
 
@@ -162,23 +177,21 @@ def getTheta(mcstep):
   pmag = sqrt(mcstep.Px()**2 + mcstep.Py()**2 + mcstep.Pz()**2)
   return acos(mcstep.Pz() / pmag)
 
-def getKinematics(ioll, trackid, pdg):
+def getTruePartInfo(ioll, trackid, pdg):
   if pdg == 0:
-    return -99., -1.
+    return -99., -1., -9999.
   mctracks = ioll.get_data(larlite.data.kMCTrack, "mcreco")
   for mctrack in mctracks:
     if mctrack.TrackID() == trackid and mctrack.PdgCode() == pdg:
-      return mctrack.Start().E(), getTheta(mctrack.Start())
+      mctrackSCE = truthTrackSCE.applySCE(mctrack)
+      return mctrack.Start().E(), getTheta(mctrack.Start()), getDistToEdge(mctrackSCE.Vertex())
   mcshowers = ioll.get_data(larlite.data.kMCShower, "mcreco")
   for mcshower in mcshowers:
     if mcshower.TrackID() == trackid and mcshower.PdgCode() == pdg:
-      return mcshower.Start().E(), getTheta(mcshower.Start())
-  return -99., -1.
+      mcshowerSCE = truthShowerTrunkSCE.applySCE(mcshower)
+      return mcshower.Start().E(), getTheta(mcshower.Start()), getDistToEdge(mcshowerSCE.Vertex())
+  return -99., -1., -9999.
       
-
-sce = larutil.SpaceChargeMicroBooNE()
-mcNuVertexer = ublarcvapp.mctools.NeutrinoVertex()
-
 
 outFile = rt.TFile(args.outfile,"RECREATE")
 
@@ -195,10 +208,12 @@ completeness = array('f', [0.])
 bestOtherComp = array('f', [0.])
 trueEnergy = array('f', [0.])
 trueTheta = array('f', [0.])
+trueEdgeDist = array('f', [0.])
 nParticles = array('i', [0])
 pdgs = array('i', 10*[0])
 purities = array('f', 10*[0.])
 isShower = array('i', [0])
+#isSecondary = array('i', [0])
 max_plane_nPix = array('i', [0])
 plane0_nPix = array('i', [0])
 plane0pix_row = array('i', nPixels*[0])
@@ -235,10 +250,12 @@ imageTree.Branch("completeness", completeness, 'completeness/F')
 imageTree.Branch("bestOtherComp", bestOtherComp, 'bestOtherComp/F')
 imageTree.Branch("trueEnergy", trueEnergy, 'trueEnergy/F')
 imageTree.Branch("trueTheta", trueTheta, 'trueTheta/F')
+imageTree.Branch("trueEdgeDist", trueEdgeDist, 'trueEdgeDist/F')
 imageTree.Branch("nParticles", nParticles, 'nParticles/I')
 imageTree.Branch("pdgs", pdgs, 'pdgs[nParticles]/I')
 imageTree.Branch("purities", purities, 'purities[nParticles]/F')
 imageTree.Branch("isShower", isShower, 'isShower/I')
+#imageTree.Branch("isSecondary", isSecondary, 'isSecondary/I')
 imageTree.Branch("max_plane_nPix", max_plane_nPix, 'max_plane_nPix/I')
 imageTree.Branch("plane0_nPix", plane0_nPix, 'plane0_nPix/I')
 imageTree.Branch("plane0pix_row", plane0pix_row, 'plane0pix_row[plane0_nPix]/I')
@@ -391,7 +408,7 @@ for filepair in filepairs:
       isShower[0] = 0
       cluster[0] = iT
 
-      trueEnergy[0], trueTheta[0] = getKinematics(ioll, trackId, pdg[0])
+      trueEnergy[0], trueTheta[0], trueEdgeDist[0] = getTruePartInfo(ioll, trackId, pdg[0])
 
       iP = 0
       for pix in prong_vv[0]:
@@ -474,7 +491,7 @@ for filepair in filepairs:
       isShower[0] = 1
       cluster[0] = iS
 
-      trueEnergy[0], trueTheta[0] = getKinematics(ioll, trackId, pdg[0])
+      trueEnergy[0], trueTheta[0], trueEdgeDist[0] = getTruePartInfo(ioll, trackId, pdg[0])
 
       iP = 0
       for pix in prong_vv[0]:
