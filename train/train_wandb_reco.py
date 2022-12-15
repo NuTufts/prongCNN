@@ -43,6 +43,10 @@ parser.add_argument("-nbv", "--n_val_batches", type=int, default=10, help="numbe
 parser.add_argument("-f", "--log_frequency", type=int, default=100, help="log progress every this number of training steps")
 parser.add_argument("-l", "--learning_rate", type=float, default=1e-3, help="learning rate")
 parser.add_argument("-e", "--epochs", type=int, default=10, help="number of training epochs")
+parser.add_argument("-sE", "--startEpoch", type=int, default=1, help="first epoch number (change if continuing run)")
+parser.add_argument("-sTS", "--startTrainStep", type=int, default=0, help="initial training step number (change if continuing run)")
+parser.add_argument("-sLS", "--startLogStep", type=int, default=0, help="initial wandb logging step number (change if continuing run)")
+parser.add_argument("-sC", "--startCheckpoint", type=str, default="", help="path for model checkpoint to load (change if continuing run)")
 parser.add_argument("-p", "--plot_tag", type=str, default="prongCNN", help="tag for output plots")
 parser.add_argument("-m", "--model_path", type=str, default="/home/mrosenberg/prongCNN/ResNet34_recoProng_b32_plAll.pt", help="model name")
 parser.add_argument("-r", "--runName", type=str, default="DEFAULT", help="wandb run name")
@@ -116,7 +120,6 @@ if args.plane2only:
         model = ResNet34Pl2(layer0inChans, ResBlock, outputs=nClasses)
     if not args.singleGPU:
         model = nn.DataParallel(model)
-    model.to(args.device)
 
 else:
     img_mean = mean
@@ -144,15 +147,20 @@ else:
         model = ResNet34(layer0inChans, ResBlock, outputs=nClasses)
     if not args.singleGPU:
         model = nn.DataParallel(model)
-    model.to(args.device)
 
+optimizer = AdamW(model.parameters(), lr=args.learning_rate)
+
+if args.startCheckpoint != "":
+  checkpoint = torch.load(args.startCheckpoint)
+  model.load_state_dict(checkpoint['model_state_dict'])
+  optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+model.to(args.device)
 print(model)
 
 wandb.watch(model,log="all",log_freq=25)
 
-opt = AdamW(model.parameters(), lr=args.learning_rate)
-
-class_weights = compute_class_weight(class_weight='balanced', classes=np.unique(train_dataset.classes),                                                  y=train_dataset.classes)
+class_weights = compute_class_weight(class_weight='balanced', classes=np.unique(train_dataset.classes), y=train_dataset.classes)
 class_weights = torch.tensor(class_weights, dtype=torch.float).to(args.device)
 print("class_weights:", class_weights)
 
@@ -274,7 +282,7 @@ def test(dataloader, model, loss_fn, n_batches=-1):
 
 
 
-def train(train_dataloader, test_dataloader, model, loss_fn, optimizer, step, epoch):
+def train(train_dataloader, test_dataloader, model, loss_fn, optimizer, step, logStep, epoch):
 
     model.train()
 
@@ -319,11 +327,13 @@ def train(train_dataloader, test_dataloader, model, loss_fn, optimizer, step, ep
                 wandb.log({"train_loss": loss, "train_acc": batchAcc, "val_loss": valLoss, "val_acc": valAcc,
                            "val_electron_acc": valAcc_e, "val_photon_acc": valAcc_ph, "val_muon_acc": valAcc_mu,
                            "val_pion_acc": valAcc_pi, "val_proton_acc": valAcc_pr, "val_other_acc": valAcc_o, 
-                           "epoch": epoch, "step": step})
+                           "epoch": epoch, "step": step}, step=logStep)
             else:
                 wandb.log({"train_loss": loss, "train_acc": batchAcc, "val_loss": valLoss, "val_acc": valAcc,
                            "val_electron_acc": valAcc_e, "val_photon_acc": valAcc_ph, "val_muon_acc": valAcc_mu,
-                           "val_pion_acc": valAcc_pi, "val_proton_acc": valAcc_pr, "epoch": epoch, "step": step})
+                           "val_pion_acc": valAcc_pi, "val_proton_acc": valAcc_pr,
+                           "epoch": epoch, "step": step}, step=logStep)
+            logStep += 1
             model.train()
 
         step += 1
@@ -335,15 +345,20 @@ def train(train_dataloader, test_dataloader, model, loss_fn, optimizer, step, ep
     print("total time spent loading data:   ", dataloading_time, flush=True)
     print("total time spent doing backprop: ", backprop_time, flush=True)
         
-    return step, avgTrainLoss.item(), trainAcc
+    return step, logStep, avgTrainLoss.item(), trainAcc
 
 
-step = 0
+step = args.startTrainStep
+logStep = args.startLogStep
 
-for e in range(1,args.epochs+1):
-    step, trL, trA = train(train_dataloader, test_dataloader, model, lossFn, opt, step, e)
+for e in range(args.startEpoch, args.epochs+args.startEpoch):
+    step, logStep, trL, trA = train(train_dataloader, test_dataloader, model, lossFn, optimizer, step, logStep, e)
     teL, teA, teA_e, teA_ph, teA_mu, teA_pi, teA_pr, teA_o = test(test_dataloader, model, lossFn)
-    print("EPOCH:", e, " train loss:",trL, " train accuracy:", trA, " test loss:", teL, " test accuracy:", teA, " electron test accuracy:", teA_e, " photon test accuracy:", teA_ph, " muon test accuracy:", teA_mu, " pion test accuracy:", teA_pi, " proton test accuracy:", teA_pr, " other test accuracy:", teA_o, flush=True)
-    torch.save(model.state_dict(), args.model_path.replace(".pt", "_epoch%i.pt"%e))
+    print("EPOCH:", e, " train loss:",trL, " train accuracy:", trA, " test loss:", teL, " test accuracy:", teA,
+          " electron test accuracy:", teA_e, " photon test accuracy:", teA_ph, " muon test accuracy:", teA_mu,
+          " pion test accuracy:", teA_pi, " proton test accuracy:", teA_pr, " other test accuracy:", teA_o, flush=True)
+    torch.save({'model_state_dict': model.state_dict(), 
+                'optimizer_state_dict': optimizer.state_dict()},
+               args.model_path.replace(".pt", "_epoch%i.pt"%e))
 
 
