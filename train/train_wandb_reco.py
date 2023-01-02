@@ -148,6 +148,7 @@ else:
     if not args.singleGPU:
         model = nn.DataParallel(model)
 
+model.to(args.device)
 optimizer = AdamW(model.parameters(), lr=args.learning_rate)
 
 if args.startCheckpoint != "":
@@ -155,7 +156,6 @@ if args.startCheckpoint != "":
   model.load_state_dict(checkpoint['model_state_dict'])
   optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
-model.to(args.device)
 print(model)
 
 wandb.watch(model,log="all",log_freq=25)
