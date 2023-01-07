@@ -153,7 +153,10 @@ optimizer = AdamW(model.parameters(), lr=args.learning_rate)
 
 if args.startCheckpoint != "":
   checkpoint = torch.load(args.startCheckpoint)
-  model.load_state_dict(checkpoint['model_state_dict'])
+  try:
+    model.load_state_dict(checkpoint['model_state_dict'])
+  except:
+    model.module.load_state_dict(checkpoint['model_state_dict'])
   optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
 print(model)
