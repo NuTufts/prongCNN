@@ -249,9 +249,9 @@ def test(dataloader, model, loss_fn, n_batches=-1):
             total_o += y[iOt].size(dim=0)
 
             if args.softLabels:
-                totalTestLoss += softNLLLoss(pred, target)
+                totalTestLoss += softNLLLoss(pred, target).detach().item()
             else:
-                totalTestLoss += loss_fn(pred, y)
+                totalTestLoss += loss_fn(pred, y).detach().item()
             testCorrect += (pred.argmax(1) == y).type(torch.float).sum().item()
             if y[iEl].size(dim=0) > 0:
                 testCorrect_e += (pred[iEl].argmax(1) == y[iEl]).type(torch.float).sum().item()
@@ -281,7 +281,7 @@ def test(dataloader, model, loss_fn, n_batches=-1):
     if total_o > 0:
         testAcc_o = testCorrect_o / total_o
     
-    return avgTestLoss.item(), testAcc, testAcc_e, testAcc_ph, testAcc_mu, testAcc_pi, testAcc_pr, testAcc_o
+    return avgTestLoss, testAcc, testAcc_e, testAcc_ph, testAcc_mu, testAcc_pi, testAcc_pr, testAcc_o
 
 
 
@@ -318,7 +318,8 @@ def train(train_dataloader, test_dataloader, model, loss_fn, optimizer, step, lo
         backprop_time += time.time() - start
         optimizer.step()
         
-        totalTrainLoss += loss
+        lossVal = loss.detach().item()
+        totalTrainLoss += lossVal
         batchCorrect = (pred.argmax(1) == y).type(torch.float).sum().item()
         trainCorrect += batchCorrect
         batchAcc = batchCorrect / train_dataloader.batch_size
@@ -327,12 +328,12 @@ def train(train_dataloader, test_dataloader, model, loss_fn, optimizer, step, lo
             print("reached training batch %i of %i"%(step, trainSteps), flush=True)
             valLoss, valAcc, valAcc_e, valAcc_ph, valAcc_mu, valAcc_pi, valAcc_pr, valAcc_o = test(test_dataloader, model, loss_fn, args.n_val_batches)
             if args.use6class:
-                wandb.log({"train_loss": loss, "train_acc": batchAcc, "val_loss": valLoss, "val_acc": valAcc,
+                wandb.log({"train_loss": lossVal, "train_acc": batchAcc, "val_loss": valLoss, "val_acc": valAcc,
                            "val_electron_acc": valAcc_e, "val_photon_acc": valAcc_ph, "val_muon_acc": valAcc_mu,
                            "val_pion_acc": valAcc_pi, "val_proton_acc": valAcc_pr, "val_other_acc": valAcc_o, 
                            "epoch": epoch, "step": step}, step=logStep)
             else:
-                wandb.log({"train_loss": loss, "train_acc": batchAcc, "val_loss": valLoss, "val_acc": valAcc,
+                wandb.log({"train_loss": lossVal, "train_acc": batchAcc, "val_loss": valLoss, "val_acc": valAcc,
                            "val_electron_acc": valAcc_e, "val_photon_acc": valAcc_ph, "val_muon_acc": valAcc_mu,
                            "val_pion_acc": valAcc_pi, "val_proton_acc": valAcc_pr,
                            "epoch": epoch, "step": step}, step=logStep)
@@ -348,7 +349,7 @@ def train(train_dataloader, test_dataloader, model, loss_fn, optimizer, step, lo
     print("total time spent loading data:   ", dataloading_time, flush=True)
     print("total time spent doing backprop: ", backprop_time, flush=True)
         
-    return step, logStep, avgTrainLoss.item(), trainAcc
+    return step, logStep, avgTrainLoss, trainAcc
 
 
 step = args.startTrainStep
