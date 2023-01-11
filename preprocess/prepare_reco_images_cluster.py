@@ -407,7 +407,7 @@ for filepair in filepairs:
 
       isShower[0] = 0
       cluster[0] = iT
-      isSecondary[0] = track_isSecondary_v[iT]
+      isSecondary[0] = nuVertex.track_isSecondary_v[iT]
 
       trueEnergy[0], trueTheta[0], trueEdgeDist[0] = getTruePartInfo(ioll, trackId, pdg[0])
 
@@ -491,7 +491,7 @@ for filepair in filepairs:
 
       isShower[0] = 1
       cluster[0] = iS
-      isSecondary[0] = shower_isSecondary_v[iS]
+      isSecondary[0] = nuVertex.shower_isSecondary_v[iS]
 
       trueEnergy[0], trueTheta[0], trueEdgeDist[0] = getTruePartInfo(ioll, trackId, pdg[0])
 
