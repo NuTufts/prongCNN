@@ -213,7 +213,7 @@ nParticles = array('i', [0])
 pdgs = array('i', 10*[0])
 purities = array('f', 10*[0.])
 isShower = array('i', [0])
-#isSecondary = array('i', [0])
+isSecondary = array('i', [0])
 max_plane_nPix = array('i', [0])
 plane0_nPix = array('i', [0])
 plane0pix_row = array('i', nPixels*[0])
@@ -255,7 +255,7 @@ imageTree.Branch("nParticles", nParticles, 'nParticles/I')
 imageTree.Branch("pdgs", pdgs, 'pdgs[nParticles]/I')
 imageTree.Branch("purities", purities, 'purities[nParticles]/F')
 imageTree.Branch("isShower", isShower, 'isShower/I')
-#imageTree.Branch("isSecondary", isSecondary, 'isSecondary/I')
+imageTree.Branch("isSecondary", isSecondary, 'isSecondary/I')
 imageTree.Branch("max_plane_nPix", max_plane_nPix, 'max_plane_nPix/I')
 imageTree.Branch("plane0_nPix", plane0_nPix, 'plane0_nPix/I')
 imageTree.Branch("plane0pix_row", plane0pix_row, 'plane0pix_row[plane0_nPix]/I')
@@ -407,6 +407,7 @@ for filepair in filepairs:
 
       isShower[0] = 0
       cluster[0] = iT
+      isSecondary[0] = track_isSecondary_v[iT]
 
       trueEnergy[0], trueTheta[0], trueEdgeDist[0] = getTruePartInfo(ioll, trackId, pdg[0])
 
@@ -490,6 +491,7 @@ for filepair in filepairs:
 
       isShower[0] = 1
       cluster[0] = iS
+      isSecondary[0] = shower_isSecondary_v[iS]
 
       trueEnergy[0], trueTheta[0], trueEdgeDist[0] = getTruePartInfo(ioll, trackId, pdg[0])
 
