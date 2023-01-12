@@ -43,7 +43,7 @@ for e in range(n_entries):
     print("reached entry %i of %i"%(e,n_entries), flush=True)
   t_orig.GetEntry(e)
 
-  classID = getClass(t_orig.pdg)
+  classID = getClass(abs(t_orig.pdg))
 
   if classCountersTest[classID] < args.nVal:
     t_test.Fill()
