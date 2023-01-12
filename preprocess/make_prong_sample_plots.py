@@ -3,6 +3,7 @@ import ROOT as rt
 import argparse
 from math import pi
 
+rt.gROOT.SetBatch(True)
 
 parser = argparse.ArgumentParser("Prepare Prong CNN Images Training File")
 parser.add_argument("-i", "--input", required=True, type=str, help="input prong image file")

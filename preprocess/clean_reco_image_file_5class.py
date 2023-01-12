@@ -14,7 +14,7 @@ args = parser.parse_args()
 f_orig = rt.TFile(args.infile)
 t_orig = f_orig.Get("ImageTree")
 
-f_out = rt.TFile(args.infile.replace(".root","_cleaned_minHit%i.root"%args.minNHit), "RECREATE")
+f_out = rt.TFile(args.infile.replace(".root","_cleaned_minHit%i_noSecondaries.root"%args.minNHit), "RECREATE")
 t_out = t_orig.CloneTree(0)
 
 def getPIDClass(pid):
@@ -34,6 +34,8 @@ def getPIDClass(pid):
 
 for e in range(t_orig.GetEntries()):
   t_orig.GetEntry(e)
+  if t_orig.isSecondary == 1:
+    continue
   pSum5Class = 0.
   pMax = -1.
   pMaxClass = 7
