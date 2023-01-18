@@ -2,6 +2,7 @@
 import argparse
 import sys
 import os
+import gc
 
 from larlite import larlite
 from larlite import larutil
@@ -267,6 +268,7 @@ def test(dataloader, model, loss_fn, n_batches=-1):
                 testCorrect_o += (pred[iOt].argmax(1) == y[iOt]).type(torch.float).sum().item()
 
             tstep += 1
+            gc.collect()
             
     #avgTestLoss = totalTestLoss / testSteps
     #testAcc = testCorrect / len(dataloader.dataset)
@@ -341,6 +343,7 @@ def train(train_dataloader, test_dataloader, model, loss_fn, optimizer, step, lo
             model.train()
 
         step += 1
+        gc.collect()
         start = time.time()
         
     avgTrainLoss = totalTrainLoss / trainSteps
