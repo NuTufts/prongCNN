@@ -40,9 +40,9 @@ def getClass3part(pid):
 class ProngDataset(Dataset):
     
     def __init__(self, rootfile, transformations=None, clip=1000.0, threePart=False):
-        self.file = uproot.open(rootfile)
-        self.tree = self.file["ImageTree"]
-        pdgs = self.tree["pdg"].array(library="np")
+        self.filename = rootfile
+        tree = uproot.open(self.filename)["ImageTree"]
+        pdgs = tree["pdg"].array(library="np")
         self.classes = np.array([getClass(pdgs[i]) for i in range(len(pdgs))])
         self.transforms = transformations
         self.threePartClass = threePart
@@ -50,12 +50,13 @@ class ProngDataset(Dataset):
     
     def __getitem__(self, item):
         #print("retrieving ProngDataset entry", item)
+        tree = uproot.open(self.filename)["ImageTree"]
         image = np.zeros((3,512,512))
         
-        arrays = self.tree.arrays(["pdg", "plane0pix_row", "plane0pix_col", "plane0pix_val",
-                                   "plane1pix_row", "plane1pix_col", "plane1pix_val",
-                                   "plane2pix_row", "plane2pix_col", "plane2pix_val"],
-                                  library="np", entry_start=item, entry_stop=item+1)
+        arrays = tree.arrays(["pdg", "plane0pix_row", "plane0pix_col", "plane0pix_val",
+                              "plane1pix_row", "plane1pix_col", "plane1pix_val",
+                              "plane2pix_row", "plane2pix_col", "plane2pix_val"],
+                             library="np", entry_start=item, entry_stop=item+1)
         image[0, arrays["plane0pix_row"][0], arrays["plane0pix_col"][0]] = arrays["plane0pix_val"][0]
         image[1, arrays["plane1pix_row"][0], arrays["plane1pix_col"][0]] = arrays["plane1pix_val"][0]
         image[2, arrays["plane2pix_row"][0], arrays["plane2pix_col"][0]] = arrays["plane2pix_val"][0]
@@ -72,15 +73,16 @@ class ProngDataset(Dataset):
         return torch.clamp(image, max=self.clipVal), Class
         
     def __len__(self):
-        return self.tree.num_entries
+        tree = uproot.open(self.filename)["ImageTree"]
+        return tree.num_entries
 
     
 class ProngDatasetPl2(Dataset):
     
     def __init__(self, rootfile, transformations=None, clip=1000.0, threePart=False):
-        self.file = uproot.open(rootfile)
-        self.tree = self.file["ImageTree"]
-        pdgs = self.tree["pdg"].array(library="np")
+        self.filename = rootfile
+        tree = uproot.open(self.filename)["ImageTree"]
+        pdgs = tree["pdg"].array(library="np")
         self.classes = np.array([getClass(pdgs[i]) for i in range(len(pdgs))])
         self.transforms = transformations
         self.threePartClass = threePart
@@ -88,10 +90,11 @@ class ProngDatasetPl2(Dataset):
     
     def __getitem__(self, item):
         #print("retrieving ProngDataset entry", item)
+        tree = uproot.open(self.filename)["ImageTree"]
         image = np.zeros((1,512,512))
         
-        arrays = self.tree.arrays(["pdg", "plane2pix_row", "plane2pix_col", "plane2pix_val"],
-                                  library="np", entry_start=item, entry_stop=item+1)
+        arrays = tree.arrays(["pdg", "plane2pix_row", "plane2pix_col", "plane2pix_val"],
+                             library="np", entry_start=item, entry_stop=item+1)
         image[0, arrays["plane2pix_row"][0], arrays["plane2pix_col"][0]] = arrays["plane2pix_val"][0]
         
         image = torch.from_numpy(image).float()
@@ -106,6 +109,7 @@ class ProngDatasetPl2(Dataset):
         return torch.clamp(image, max=self.clipVal), Class
         
     def __len__(self):
-        return self.tree.num_entries
+        tree = uproot.open(self.filename)["ImageTree"]
+        return tree.num_entries
 
 
