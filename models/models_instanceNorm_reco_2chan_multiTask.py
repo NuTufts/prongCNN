@@ -70,8 +70,9 @@ class ResNet34(nn.Module):
         self.gap = nn.AdaptiveAvgPool2d(1)
         self.fc = nn.Linear(1536, outputs)
 
-        self.fcReg1 = nn.Linear(1536, 768)
-        self.fcReg2 = nn.Linear(768, 1)
+        #self.fcReg1 = nn.Linear(1536, 768)
+        #self.fcReg2 = nn.Linear(768, 1)
+        self.fcReg = nn.Linear(1536, 1)
         
         self.logSoftmax = nn.LogSoftmax(dim=1)
 
@@ -109,10 +110,11 @@ class ResNet34(nn.Module):
         X = torch.cat((X0, X1, X2), 1)
 
         Xclass = self.fc(X)
-        Xreg = nn.ReLU(self.fcReg1(X))
-        Xreg = self.fcReg2(Xreg)
+        #Xreg = nn.ReLU()(self.fcReg1(X))
+        #Xreg = self.fcReg2(Xreg)
+        Xreg = self.fcReg(X)
 
-        outputs = [self.logSoftmax(Xclass), nn.Sigmoid(Xreg)]
+        outputs = [self.logSoftmax(Xclass), nn.Sigmoid()(Xreg).squeeze()]
         return outputs
 
 

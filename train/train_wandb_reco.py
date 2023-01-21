@@ -19,6 +19,8 @@ from sklearn.utils.class_weight import compute_class_weight
 import time
 import random
 
+from math import sqrt
+
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
@@ -48,8 +50,8 @@ parser.add_argument("-sE", "--startEpoch", type=int, default=1, help="first epoc
 parser.add_argument("-sTS", "--startTrainStep", type=int, default=0, help="initial training step number (change if continuing run)")
 parser.add_argument("-sLS", "--startLogStep", type=int, default=0, help="initial wandb logging step number (change if continuing run)")
 parser.add_argument("-sC", "--startCheckpoint", type=str, default="", help="path for model checkpoint to load (change if continuing run)")
-parser.add_argument("-p", "--plot_tag", type=str, default="prongCNN", help="tag for output plots")
 parser.add_argument("-m", "--model_path", type=str, default="/home/mrosenberg/prongCNN/ResNet34_recoProng_b32_plAll.pt", help="model name")
+parser.add_argument("-p", "--projectName", type=str, default="prongCNN-5particle-recoProngs-multiTask", help="wandb project name")
 parser.add_argument("-r", "--runName", type=str, default="DEFAULT", help="wandb run name")
 parser.add_argument("--multiTask", action="store_true", help="do particle classification and completeness regression")
 parser.add_argument("--use6class", action="store_true", help="use 6 classes (include other label)")
@@ -98,12 +100,7 @@ torch.manual_seed(0)
 random.seed(0)
 np.random.seed(0)
 
-if args.multiTask:
-  projectName = "prongCNN-5particle-recoProngs-multiTask"
-else:
-  projectName = "prongCNN-5particle-recoProngs"
-
-wandb.init(project=projectName)
+wandb.init(project=args.projectName)
 if args.runName != "DEFAULT":
   wandb.run.name = args.runName
   wandb.run.save()
@@ -200,22 +197,23 @@ lossFn = nn.NLLLoss(weight=class_weights) #use if softmax is in model
 if args.multiTask:
 
   class MultiTaskLoss(nn.Module):
-    def __init__(self, model, loss_fn, eta):
+    def __init__(self, model, loss_fns, eta):
       super(MultiTaskLoss, self).__init__()
       self.model = model
-      self.loss_fn = loss_fn
+      self.loss_fns = loss_fns
       self.eta = nn.Parameter(torch.Tensor(eta))
     def forward(self, image, targets):
       outputs = self.model(image)
-      loss = [l(o,y).sum() for l, o, y in zip(self.loss_fn, outputs, targets)]
+      loss = [l(o,y) for l, o, y in zip(self.loss_fns, outputs, targets)]
       total_loss = torch.Tensor(loss) * torch.exp(-self.eta) + self.eta
-      return loss, total_loss.sum()
+      return outputs, loss, total_loss.sum()
 
-  lossMulti = MultiTaskLoss(loss_fn=[lossFn, nn.MSELoss()], eta=[1.0, 1.0])
+  lossMulti = MultiTaskLoss(model, loss_fns=[lossFn, nn.MSELoss()], eta=[1.0, 1.0])
   optimizer = AdamW(lossMulti.parameters(), lr=args.learning_rate)
 
 else:
   optimizer = AdamW(model.parameters(), lr=args.learning_rate)
+
 
 if args.startCheckpoint != "":
   checkpoint = torch.load(args.startCheckpoint)
@@ -229,7 +227,8 @@ if args.startCheckpoint != "":
 
 
 
-def test(dataloader, model, loss_fn, n_batches=-1):
+#def test(dataloader, model, loss_fn, n_batches=-1):
+def test(dataloader, n_batches=-1):
     
     model.eval()
     
@@ -249,6 +248,10 @@ def test(dataloader, model, loss_fn, n_batches=-1):
     total_o = 0
     testSteps = len(dataloader.dataset) // dataloader.batch_size
     tstep = 0
+    if args.multiTask:
+      totalClassLoss = 0.
+      totalCompLoss = 0.
+      totalErrorSqSum = 0.
     
     with torch.no_grad():
         
@@ -257,17 +260,29 @@ def test(dataloader, model, loss_fn, n_batches=-1):
                 break
             if tstep % args.log_frequency == 0:
                 print("reached validation batch %i of %i"%(tstep, testSteps), flush=True)
-            if args.softLabels:
+            if args.multiTask:
+                yReg = y[1]
+                y = y[0].type(torch.LongTensor)
+                X, y, yReg = X.to(args.device), y.to(args.device), yReg.to(args.device)
+                outputs, losses, loss = lossMulti(X, [y, yReg])
+                pred = outputs[0]
+                pred_comp = outputs[1]
+                totalTestLoss += loss.detach().item()
+                totalClassLoss += losses[0].detach().item()
+                totalCompLoss += losses[1].detach().item()
+                totalErrorSqSum += torch.square(torch.sub(yReg, pred_comp)).sum().item()
+            elif args.softLabels:
                 target = y
                 y = y.argmax(1)
-                target = target.to(args.device)
+                X, y, target = X.to(args.device), y.to(args.device), target.to(args.device)
+                pred = model(X)
+                totalTestLoss += softNLLLoss(pred, target)
             else:
                 y = y.type(torch.LongTensor)
-            X, y = X.to(args.device), y.to(args.device)
-            pred = model(X)
-            #print(pred)
-            #print(y)
-            #print(loss_fn(pred, y))
+                X, y = X.to(args.device), y.to(args.device)
+                pred = model(X)
+                #totalTestLoss += loss_fn(pred, y).detach().item()
+                totalTestLoss += lossFn(pred, y).detach().item()
             
             iEl = (y == 0).nonzero(as_tuple=True)
             iPh = (y == 1).nonzero(as_tuple=True)
@@ -283,10 +298,6 @@ def test(dataloader, model, loss_fn, n_batches=-1):
             total_pr += y[iPr].size(dim=0)
             total_o += y[iOt].size(dim=0)
 
-            if args.softLabels:
-                totalTestLoss += softNLLLoss(pred, target).detach().item()
-            else:
-                totalTestLoss += loss_fn(pred, y).detach().item()
             testCorrect += (pred.argmax(1) == y).type(torch.float).sum().item()
             if y[iEl].size(dim=0) > 0:
                 testCorrect_e += (pred[iEl].argmax(1) == y[iEl]).type(torch.float).sum().item()
@@ -316,12 +327,19 @@ def test(dataloader, model, loss_fn, n_batches=-1):
     testAcc_o = 0.
     if total_o > 0:
         testAcc_o = testCorrect_o / total_o
-    
+    if args.multiTask:
+      avgClassLoss = totalClassLoss / tstep
+      avgCompLoss = totalCompLoss / tstep
+      testRMSE = sqrt( totalErrorSqSum / (tstep*dataloader.batch_size) )
+
+    if args.multiTask:
+      return avgTestLoss, avgClassLoss, testAcc, testAcc_e, testAcc_ph, testAcc_mu, testAcc_pi, testAcc_pr, testAcc_o, avgCompLoss, testRMSE
     return avgTestLoss, testAcc, testAcc_e, testAcc_ph, testAcc_mu, testAcc_pi, testAcc_pr, testAcc_o
 
 
 
-def train(train_dataloader, test_dataloader, model, loss_fn, optimizer, step, logStep, epoch):
+#def train(train_dataloader, test_dataloader, model, loss_fn, optimizer, step, logStep, epoch):
+def train(train_dataloader, test_dataloader, step, logStep, epoch):
 
     model.train()
 
@@ -330,22 +348,33 @@ def train(train_dataloader, test_dataloader, model, loss_fn, optimizer, step, lo
     trainSteps = len(train_dataloader.dataset) // train_dataloader.batch_size
     dataloading_time = 0.
     backprop_time = 0.
+    if args.multiTask:
+      totalClassLoss = 0.
+      totalCompLoss = 0.
+      totalErrorSqSum = 0.
     
     start = time.time()
     for batch, (X,y) in enumerate(train_dataloader):
         dataloading_time += time.time() - start
-        if args.softLabels:
+        if args.multiTask:
+            yReg = y[1]
+            y = y[0].type(torch.LongTensor)
+            X, y, yReg = X.to(args.device), y.to(args.device), yReg.to(args.device)
+            outputs, losses, loss = lossMulti(X, [y, yReg])
+            pred = outputs[0]
+            pred_comp = outputs[1]
+        elif args.softLabels:
             target = y
             y = y.argmax(1)
-            target = target.to(args.device)
-        else:
-            y = y.type(torch.LongTensor)
-        X, y = X.to(args.device), y.to(args.device)
-        pred = model(X)
-        if args.softLabels:
+            X, y, target = X.to(args.device), y.to(args.device), target.to(args.device)
+            pred = model(X)
             loss = softNLLLoss(pred, target)
         else:
-            loss = loss_fn(pred, y)
+            y = y.type(torch.LongTensor)
+            X, y = X.to(args.device), y.to(args.device)
+            pred = model(X)
+            #loss = loss_fn(pred, y)
+            loss = lossFn(pred, y)
         
         optimizer.zero_grad()
         start = time.time()
@@ -359,11 +388,32 @@ def train(train_dataloader, test_dataloader, model, loss_fn, optimizer, step, lo
         batchCorrect = (pred.argmax(1) == y).type(torch.float).sum().item()
         trainCorrect += batchCorrect
         batchAcc = batchCorrect / train_dataloader.batch_size
+        if args.multiTask:
+            lossClassVal = losses[0].detach().item()
+            lossCompVal = losses[1].detach().item()
+            batchErrorSqSum = torch.square(torch.sub(yReg, pred_comp)).sum().item()
+            totalClassLoss += lossClassVal
+            totalCompLoss += lossCompVal
+            totalErrorSqSum += batchErrorSqSum
+            batchRMSE = sqrt(batchErrorSqSum / train_dataloader.batch_size)
 
         if step % args.log_frequency == 0:
             print("reached training batch %i of %i"%(step, trainSteps), flush=True)
-            valLoss, valAcc, valAcc_e, valAcc_ph, valAcc_mu, valAcc_pi, valAcc_pr, valAcc_o = test(test_dataloader, model, loss_fn, args.n_val_batches)
-            if args.use6class:
+            if args.multiTask:
+                #valLoss, valClassLoss, valAcc, valAcc_e, valAcc_ph, valAcc_mu, valAcc_pi, valAcc_pr, valAcc_o, valCompLoss, valRMSE = test(test_dataloader, model, loss_fn, args.n_val_batches)
+                valLoss, valClassLoss, valAcc, valAcc_e, valAcc_ph, valAcc_mu, valAcc_pi, valAcc_pr, valAcc_o, valCompLoss, valRMSE = test(test_dataloader, args.n_val_batches)
+            else:
+                #valLoss, valAcc, valAcc_e, valAcc_ph, valAcc_mu, valAcc_pi, valAcc_pr, valAcc_o = test(test_dataloader, model, loss_fn, args.n_val_batches)
+                valLoss, valAcc, valAcc_e, valAcc_ph, valAcc_mu, valAcc_pi, valAcc_pr, valAcc_o = test(test_dataloader, args.n_val_batches)
+            if args.multiTask:
+                wandb.log({"train_loss": lossVal, "train_class_loss": lossClassVal, "train_comp_loss": lossCompVal,
+                           "train_class_acc": batchAcc, "train_comp_rmse": batchRMSE,
+                           "val_loss": valLoss, "val_class_loss": valClassLoss, "val_comp_loss": valCompLoss,
+                           "val_acc": valAcc, "val_comp_rmse": valRMSE,
+                           "val_electron_acc": valAcc_e, "val_photon_acc": valAcc_ph, "val_muon_acc": valAcc_mu,
+                           "val_pion_acc": valAcc_pi, "val_proton_acc": valAcc_pr,
+                           "epoch": epoch, "step": step}, step=logStep)
+            elif args.use6class:
                 wandb.log({"train_loss": lossVal, "train_acc": batchAcc, "val_loss": valLoss, "val_acc": valAcc,
                            "val_electron_acc": valAcc_e, "val_photon_acc": valAcc_ph, "val_muon_acc": valAcc_mu,
                            "val_pion_acc": valAcc_pi, "val_proton_acc": valAcc_pr, "val_other_acc": valAcc_o, 
@@ -382,10 +432,16 @@ def train(train_dataloader, test_dataloader, model, loss_fn, optimizer, step, lo
         
     avgTrainLoss = totalTrainLoss / trainSteps
     trainAcc = trainCorrect / len(train_dataloader.dataset)
+    if args.multiTask:
+      avgClassLoss = totalClassLoss /  trainSteps
+      avgCompLoss = totalCompLoss / trainSteps
+      trainRMSE = sqrt( totalErrorSqSum / len(train_dataloader.dataset) )
     
     print("total time spent loading data:   ", dataloading_time, flush=True)
     print("total time spent doing backprop: ", backprop_time, flush=True)
-        
+
+    if args.multiTask:
+      return step, logStep, avgTrainLoss, avgClassLoss, trainAcc, avgCompLoss, trainRMSE
     return step, logStep, avgTrainLoss, trainAcc
 
 
@@ -393,13 +449,27 @@ step = args.startTrainStep
 logStep = args.startLogStep
 
 for e in range(args.startEpoch, args.epochs+args.startEpoch):
-    step, logStep, trL, trA = train(train_dataloader, test_dataloader, model, lossFn, optimizer, step, logStep, e)
-    teL, teA, teA_e, teA_ph, teA_mu, teA_pi, teA_pr, teA_o = test(test_dataloader, model, lossFn)
+  if args.multiTask:
+    #step, logStep, trL, trClL, trA, trCoL, trRMSE = train(train_dataloader, test_dataloader, model, lossFn, optimizer, step, logStep, e)
+    #teL, teClL, teA, teA_e, teA_ph, teA_mu, teA_pi, teA_pr, teA_o, teCoL, teRMSE = test(test_dataloader, model, lossFn)
+    step, logStep, trL, trClL, trA, trCoL, trRMSE = train(train_dataloader, test_dataloader, step, logStep, e)
+    teL, teClL, teA, teA_e, teA_ph, teA_mu, teA_pi, teA_pr, teA_o, teCoL, teRMSE = test(test_dataloader)
+    print("EPOCH:", e, " train total loss:", trL, " train class loss:", trClL, " train comp loss:", trCoL,
+          " train class accuracy:", trA, " train comp RMSE:", trRMSE,
+          " test total loss:", teL, " test class loss:", teClL, "test comp loss:", teCoL,
+          " test class accuracy:", teA, " test comp RMSE:", teRMSE,
+          " electron test accuracy:", teA_e, " photon test accuracy:", teA_ph, " muon test accuracy:", teA_mu,
+          " pion test accuracy:", teA_pi, " proton test accuracy:", teA_pr, " other test accuracy:", teA_o, flush=True)
+  else:
+    #step, logStep, trL, trA = train(train_dataloader, test_dataloader, model, lossFn, optimizer, step, logStep, e)
+    #teL, teA, teA_e, teA_ph, teA_mu, teA_pi, teA_pr, teA_o = test(test_dataloader, model, lossFn)
+    step, logStep, trL, trA = train(train_dataloader, test_dataloader, step, logStep, e)
+    teL, teA, teA_e, teA_ph, teA_mu, teA_pi, teA_pr, teA_o = test(test_dataloader)
     print("EPOCH:", e, " train loss:",trL, " train accuracy:", trA, " test loss:", teL, " test accuracy:", teA,
           " electron test accuracy:", teA_e, " photon test accuracy:", teA_ph, " muon test accuracy:", teA_mu,
           " pion test accuracy:", teA_pi, " proton test accuracy:", teA_pr, " other test accuracy:", teA_o, flush=True)
-    torch.save({'model_state_dict': model.state_dict(), 
-                'optimizer_state_dict': optimizer.state_dict()},
-               args.model_path.replace(".pt", "_epoch%i.pt"%e))
+  torch.save({'model_state_dict': model.state_dict(), 
+              'optimizer_state_dict': optimizer.state_dict()},
+             args.model_path.replace(".pt", "_epoch%i.pt"%e))
 
 
