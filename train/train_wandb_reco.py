@@ -51,6 +51,7 @@ parser.add_argument("-sC", "--startCheckpoint", type=str, default="", help="path
 parser.add_argument("-p", "--plot_tag", type=str, default="prongCNN", help="tag for output plots")
 parser.add_argument("-m", "--model_path", type=str, default="/home/mrosenberg/prongCNN/ResNet34_recoProng_b32_plAll.pt", help="model name")
 parser.add_argument("-r", "--runName", type=str, default="DEFAULT", help="wandb run name")
+parser.add_argument("--multiTask", action="store_true", help="do particle classification and completeness regression")
 parser.add_argument("--use6class", action="store_true", help="use 6 classes (include other label)")
 parser.add_argument("--softLabels", action="store_true", help="use soft labels for loss")
 parser.add_argument("--noMask", action="store_true", help="only use prong pixels")
@@ -60,7 +61,12 @@ parser.add_argument("--resnet18", action="store_true", help="use ResNet18 instea
 parser.add_argument("--singleGPU", action="store_true", help="only use one GPU")
 args = parser.parse_args()
 
-if args.noMask:
+if args.multiTask and (args.l0inChans != 2 or args.use6class or args.softLabels or args.noMask or args.plane2only or args.resnet18):
+  sys.exit("multiTask training only configured for 5 class hard labels with mask (3 plane, 2 in channel config.) with ResNet34")
+
+if args.multiTask:
+  from models_instanceNorm_reco_2chan_multiTask import ResBlock, ResNet34
+elif args.noMask:
   from models_instanceNorm import ResBlock, ResNet18, ResNet18Pl2, ResNet34, ResNet34Pl2
 elif args.l0inChans == 1:
   from models_instanceNorm_reco_1chan import ResBlock, ResNet18, ResNet18Pl2, ResNet34, ResNet34Pl2
@@ -74,13 +80,15 @@ if args.use6class and args.softLabels:
   sys.exit("modules not configured for 6 class soft labels")
 
 nClasses = 5
-if args.use6class:
-    from datasets_reco import ProngDataset, ProngDatasetPl2, mean, std, meanPl2, stdPl2, ProngDatasetNoMask, ProngDatasetPl2NoMask, mean_nm, std_nm, meanPl2_nm, stdPl2_nm
-    nClasses = 6
+if args.multiTask:
+  from datasets_reco_5ClassHardLabel_multiTask import ProngDataset, mean, std
+elif args.use6class:
+  from datasets_reco import ProngDataset, ProngDatasetPl2, mean, std, meanPl2, stdPl2, ProngDatasetNoMask, ProngDatasetPl2NoMask, mean_nm, std_nm, meanPl2_nm, stdPl2_nm
+  nClasses = 6
 elif args.softLabels:
-    from datasets_reco_5ClassSoftLabel import ProngDataset, ProngDatasetPl2, mean, std, meanPl2, stdPl2, ProngDatasetNoMask, ProngDatasetPl2NoMask, mean_nm, std_nm, meanPl2_nm, stdPl2_nm
+  from datasets_reco_5ClassSoftLabel import ProngDataset, ProngDatasetPl2, mean, std, meanPl2, stdPl2, ProngDatasetNoMask, ProngDatasetPl2NoMask, mean_nm, std_nm, meanPl2_nm, stdPl2_nm
 else:
-    from datasets_reco_5ClassHardLabel import ProngDataset, ProngDatasetPl2, mean, std, meanPl2, stdPl2, ProngDatasetNoMask, ProngDatasetPl2NoMask, mean_nm, std_nm, meanPl2_nm, stdPl2_nm
+  from datasets_reco_5ClassHardLabel import ProngDataset, ProngDatasetPl2, mean, std, meanPl2, stdPl2, ProngDatasetNoMask, ProngDatasetPl2NoMask, mean_nm, std_nm, meanPl2_nm, stdPl2_nm
 
 layer0inChans = args.l0inChans
 if args.noMask:
@@ -90,7 +98,12 @@ torch.manual_seed(0)
 random.seed(0)
 np.random.seed(0)
 
-wandb.init(project="prongCNN-5particle-recoProngs")
+if args.multiTask:
+  projectName = "prongCNN-5particle-recoProngs-multiTask"
+else:
+  projectName = "prongCNN-5particle-recoProngs"
+
+wandb.init(project=projectName)
 if args.runName != "DEFAULT":
   wandb.run.name = args.runName
   wandb.run.save()
@@ -150,16 +163,6 @@ else:
         model = nn.DataParallel(model)
 
 model.to(args.device)
-optimizer = AdamW(model.parameters(), lr=args.learning_rate)
-
-if args.startCheckpoint != "":
-  checkpoint = torch.load(args.startCheckpoint)
-  try:
-    model.load_state_dict(checkpoint['model_state_dict'])
-  except:
-    model.module.load_state_dict(checkpoint['model_state_dict'])
-  optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-
 print(model)
 
 wandb.watch(model,log="all",log_freq=25)
@@ -193,6 +196,37 @@ def softNLLLoss(pred, target):
 
 lossFn = nn.NLLLoss(weight=class_weights) #use if softmax is in model
 #lossFn = nn.CrossEntropyLoss() #use if softmax not in model
+
+if args.multiTask:
+
+  class MultiTaskLoss(nn.Module):
+    def __init__(self, model, loss_fn, eta):
+      super(MultiTaskLoss, self).__init__()
+      self.model = model
+      self.loss_fn = loss_fn
+      self.eta = nn.Parameter(torch.Tensor(eta))
+    def forward(self, image, targets):
+      outputs = self.model(image)
+      loss = [l(o,y).sum() for l, o, y in zip(self.loss_fn, outputs, targets)]
+      total_loss = torch.Tensor(loss) * torch.exp(-self.eta) + self.eta
+      return loss, total_loss.sum()
+
+  lossMulti = MultiTaskLoss(loss_fn=[lossFn, nn.MSELoss()], eta=[1.0, 1.0])
+  optimizer = AdamW(lossMulti.parameters(), lr=args.learning_rate)
+
+else:
+  optimizer = AdamW(model.parameters(), lr=args.learning_rate)
+
+if args.startCheckpoint != "":
+  checkpoint = torch.load(args.startCheckpoint)
+  try:
+    model.load_state_dict(checkpoint['model_state_dict'])
+  except:
+    model.module.load_state_dict(checkpoint['model_state_dict'])
+  optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+
+
 
 
 def test(dataloader, model, loss_fn, n_batches=-1):
