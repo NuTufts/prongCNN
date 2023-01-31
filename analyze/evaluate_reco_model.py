@@ -26,6 +26,8 @@ parser.add_argument("-d", "--device", type=str, default="cuda", help="gpu/cpu de
 parser.add_argument("-n", "--num_workers", type=int, default=12, help="number of cpu workers for data loading")
 parser.add_argument("-b", "--batch_size", type=int, default=1, help="validation batch size")
 parser.add_argument("-c", "--l0inChans", type=int, default=2, help="number of input channels for first conv layer")
+parser.add_argument("--multiTask", action="store_true", help="do particle classification and completeness regression")
+parser.add_argument("--classifyComp", action="store_true", help="do classification instead of regression for completeness")
 parser.add_argument("--use6class", action="store_true", help="use 6 classes (include other label)")
 parser.add_argument("--softLabels", action="store_true", help="use soft labels for loss")
 parser.add_argument("--noMask", action="store_true", help="only use prong pixels")
@@ -34,8 +36,12 @@ parser.add_argument("--resnet18", action="store_true", help="use ResNet18 instea
 parser.add_argument("--singleGPU", action="store_true", help="only use one GPU")
 args = parser.parse_args()
 
+if args.multiTask and (args.l0inChans != 2 or args.use6class or args.softLabels or args.noMask or args.plane2only or args.resnet18):
+  sys.exit("multiTask training only configured for 5 class hard labels with mask (3 plane, 2 in channel config.) with ResNet34")
 
-if args.noMask:
+if args.multiTask:
+  from models_instanceNorm_reco_2chan_multiTask import ResBlock, ResNet34, ResNet34ClCmp
+elif args.noMask:
   from models_instanceNorm import ResBlock, ResNet18, ResNet18Pl2, ResNet34, ResNet34Pl2
 elif args.l0inChans == 1:
   from models_instanceNorm_reco_1chan import ResBlock, ResNet18, ResNet18Pl2, ResNet34, ResNet34Pl2
@@ -49,7 +55,9 @@ if args.use6class and args.softLabels:
   sys.exit("modules not configured for 6 class soft labels")
 
 nClasses = 5
-if args.use6class:
+if args.multiTask:
+    from datasets_reco_5ClassHardLabel_multiTask import ProngDataset, ProngDatasetClCmp, mean, std
+elif args.use6class:
     from datasets_reco import ProngDataset, ProngDatasetPl2, mean, std, meanPl2, stdPl2, ProngDatasetNoMask, ProngDatasetPl2NoMask, mean_nm, std_nm, meanPl2_nm, stdPl2_nm
     nClasses = 6
 elif args.softLabels:
@@ -94,7 +102,10 @@ else:
     if args.noMask:
       dataset = ProngDatasetNoMask(args.images_file, transformations=transform, clip=4.0)
     else:
-      dataset = ProngDataset(args.images_file, transformations=transform, clip=4.0)
+      if args.multiTask and args.classifyComp:
+        dataset = ProngDatasetClCmp(args.images_file, transformations=transform, clip=4.0)
+      else:
+        dataset = ProngDataset(args.images_file, transformations=transform, clip=4.0)
     dataloader = DataLoader(dataset, batch_size=args.batch_size, drop_last=False, shuffle=True, num_workers=args.num_workers)
 
     if args.resnet18:
@@ -149,12 +160,25 @@ def test(dataloader, model):
         for batch, (X, y) in enumerate(dataloader):
             if tstep % 1000 == 0:
                 print("reached validation batch %i of %i"%(tstep, testSteps), flush=True)
-            if args.softLabels:
+            if args.multiTask:
+                if args.classifyComp:
+                    yComp = y[1].type(torch.LongTensor)
+                else:
+                    yComp = y[1]
+                    #yCompCl = []
+                y = y[0].type(torch.LongTensor)
+                X, y, yComp = X.to(args.device), y.to(args.device), yComp.to(args.device)
+                outputs = model(X)
+                pred = outputs[0]
+                pred_comp = outputs[1]
+            elif args.softLabels:
                 y = y.argmax(1)
+                X, y = X.to(args.device), y.to(args.device)
+                pred = model(X)
             else:
                 y = y.type(torch.LongTensor)
-            X, y = X.to(args.device), y.to(args.device)
-            pred = model(X)
+                X, y = X.to(args.device), y.to(args.device)
+                pred = model(X)
             y_pred = pred.argmax(1)
             
             for i in range(y.size(0)):

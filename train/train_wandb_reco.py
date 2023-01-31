@@ -54,6 +54,7 @@ parser.add_argument("-m", "--model_path", type=str, default="/home/mrosenberg/pr
 parser.add_argument("-p", "--projectName", type=str, default="prongCNN-5particle-recoProngs-multiTask", help="wandb project name")
 parser.add_argument("-r", "--runName", type=str, default="DEFAULT", help="wandb run name")
 parser.add_argument("--multiTask", action="store_true", help="do particle classification and completeness regression")
+parser.add_argument("--classifyComp", action="store_true", help="do classification instead of regression for completeness")
 parser.add_argument("--use6class", action="store_true", help="use 6 classes (include other label)")
 parser.add_argument("--softLabels", action="store_true", help="use soft labels for loss")
 parser.add_argument("--noMask", action="store_true", help="only use prong pixels")
@@ -68,7 +69,7 @@ if args.multiTask and (args.l0inChans != 2 or args.use6class or args.softLabels 
   sys.exit("multiTask training only configured for 5 class hard labels with mask (3 plane, 2 in channel config.) with ResNet34")
 
 if args.multiTask:
-  from models_instanceNorm_reco_2chan_multiTask import ResBlock, ResNet34
+  from models_instanceNorm_reco_2chan_multiTask import ResBlock, ResNet34, ResNet34ClCmp
 elif args.noMask:
   from models_instanceNorm import ResBlock, ResNet18, ResNet18Pl2, ResNet34, ResNet34Pl2
 elif args.l0inChans == 1:
@@ -84,7 +85,7 @@ if args.use6class and args.softLabels:
 
 nClasses = 5
 if args.multiTask:
-  from datasets_reco_5ClassHardLabel_multiTask import ProngDataset, mean, std
+  from datasets_reco_5ClassHardLabel_multiTask import ProngDataset, ProngDatasetClCmp, mean, std
 elif args.use6class:
   from datasets_reco import ProngDataset, ProngDatasetPl2, mean, std, meanPl2, stdPl2, ProngDatasetNoMask, ProngDatasetPl2NoMask, mean_nm, std_nm, meanPl2_nm, stdPl2_nm
   nClasses = 6
@@ -150,15 +151,22 @@ else:
       train_dataset = ProngDatasetNoMask(args.train_file, transformations=train_transform, clip=4.0)
       test_dataset = ProngDatasetNoMask(args.val_file, transformations=test_transform, clip=4.0)
     else:
-      train_dataset = ProngDataset(args.train_file, transformations=train_transform, clip=4.0)
-      test_dataset = ProngDataset(args.val_file, transformations=test_transform, clip=4.0)
+      if args.multiTask and args.classifyComp:
+        train_dataset = ProngDatasetClCmp(args.train_file, transformations=train_transform, clip=4.0)
+        test_dataset = ProngDatasetClCmp(args.val_file, transformations=test_transform, clip=4.0)
+      else:
+        train_dataset = ProngDataset(args.train_file, transformations=train_transform, clip=4.0)
+        test_dataset = ProngDataset(args.val_file, transformations=test_transform, clip=4.0)
     train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size_train, drop_last=args.dropLast, shuffle=True, num_workers=args.num_workers)
     test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size_val, drop_last=False, shuffle=True, num_workers=args.num_workers)
 
     if args.resnet18:
         model = ResNet18(layer0inChans, ResBlock, outputs=nClasses)
     else:
-        model = ResNet34(layer0inChans, ResBlock, outputs=nClasses)
+        if args.multiTask and args.classifyComp:
+            model = ResNet34ClCmp(layer0inChans, ResBlock, outputs=nClasses)
+        else:
+            model = ResNet34(layer0inChans, ResBlock, outputs=nClasses)
     if not args.singleGPU:
         model = nn.DataParallel(model)
 
@@ -171,6 +179,12 @@ if not args.noLogs:
 class_weights = compute_class_weight(class_weight='balanced', classes=np.unique(train_dataset.classes), y=train_dataset.classes)
 class_weights = torch.tensor(class_weights, dtype=torch.float).to(args.device)
 print("class_weights:", class_weights)
+
+if args.multiTask and args.classifyComp:
+  comp_class_weights = compute_class_weight(class_weight='balanced', classes=np.unique(train_dataset.compClasses), y=train_dataset.compClasses)
+  comp_class_weights = torch.tensor(comp_class_weights, dtype=torch.float).to(args.device)
+  print("comp_class_weights:", comp_class_weights)
+  lossFnComp = nn.NLLLoss(weight=comp_class_weights)
 
 def softNLLLoss(pred, target):
     return -(class_weights*target*pred).sum() / class_weights.sum()
@@ -196,6 +210,17 @@ lossFn = nn.NLLLoss(weight=class_weights) #use if softmax is in model
 
 lossMSE = nn.MSELoss()
 
+class MultiTaskLossClCmp(nn.Module):
+  def __init__(self):
+    super(MultiTaskLoss, self).__init__()
+    self.etaC = nn.Parameter(torch.Tensor([0.5]))
+    self.etaR = nn.Parameter(torch.Tensor([0.5]))
+  def forward(self, outputs, targets):
+    loss_class = lossFn(outputs[0], targets[0])
+    loss_comp = lossFnComp(outputs[1], targets[1])
+    loss_total = 2.0*torch.exp(-self.etaC)*loss_class + 2.0*torch.exp(-self.etaR)*loss_comp + self.etaC + self.etaR
+    return [loss_class, loss_comp], loss_total, [self.etaC, self.etaR]
+
 class MultiTaskLoss(nn.Module):
   def __init__(self):
     super(MultiTaskLoss, self).__init__()
@@ -208,7 +233,10 @@ class MultiTaskLoss(nn.Module):
     return [loss_class, loss_reg], loss_total, [self.etaC, self.etaR]
 
 if args.multiTask:
-  lossMulti = MultiTaskLoss().to(args.device)
+  if args.classifyComp:
+    lossMulti = MultiTaskLossClCmp().to(args.device)
+  else:
+    lossMulti = MultiTaskLoss().to(args.device)
   optimizer = AdamW(list(lossMulti.parameters())+list(model.parameters()), lr=args.learning_rate)
 
 else:
@@ -227,7 +255,6 @@ if args.startCheckpoint != "":
 
 
 
-#def test(dataloader, model, loss_fn, n_batches=-1):
 def test(dataloader, n_batches=-1):
     
     model.eval()
@@ -254,6 +281,17 @@ def test(dataloader, n_batches=-1):
       totalClassLoss = 0.
       totalCompLoss = 0.
       totalErrorSqSum = 0.
+      testCompCorrect = 0
+      testCorrect_c0 = 0
+      testCorrect_c1 = 0
+      testCorrect_c2 = 0
+      testCorrect_c3 = 0
+      testCorrect_c4 = 0
+      total_c0 = 0
+      total_c1 = 0
+      total_c2 = 0
+      total_c3 = 0
+      total_c4 = 0
     
     with torch.no_grad():
         
@@ -263,17 +301,21 @@ def test(dataloader, n_batches=-1):
             if tstep % args.log_frequency == 0:
                 print("reached validation batch %i of %i"%(tstep, testSteps), flush=True)
             if args.multiTask:
-                yReg = y[1]
+                if args.classifyComp:
+                    yComp = y[1].type(torch.LongTensor)
+                else:
+                    yComp = y[1]
                 y = y[0].type(torch.LongTensor)
-                X, y, yReg = X.to(args.device), y.to(args.device), yReg.to(args.device)
+                X, y, yComp = X.to(args.device), y.to(args.device), yComp.to(args.device)
                 outputs = model(X)
-                losses, loss, lossWeights = lossMulti(outputs, [y, yReg])
+                losses, loss, lossWeights = lossMulti(outputs, [y, yComp])
                 pred = outputs[0]
                 pred_comp = outputs[1]
                 totalTestLoss += loss.detach().item()
                 totalClassLoss += losses[0].detach().item()
                 totalCompLoss += losses[1].detach().item()
-                totalErrorSqSum += torch.square(torch.sub(yReg, pred_comp)).sum().item()
+                if not args.classifyComp:
+                    totalErrorSqSum += torch.square(torch.sub(yComp, pred_comp)).sum().item()
             elif args.softLabels:
                 target = y
                 y = y.argmax(1)
@@ -284,7 +326,6 @@ def test(dataloader, n_batches=-1):
                 y = y.type(torch.LongTensor)
                 X, y = X.to(args.device), y.to(args.device)
                 pred = model(X)
-                #totalTestLoss += loss_fn(pred, y).detach().item()
                 totalTestLoss += lossFn(pred, y).detach().item()
             
             iEl = (y == 0).nonzero(as_tuple=True)
@@ -315,11 +356,35 @@ def test(dataloader, n_batches=-1):
             if y[iOt].size(dim=0) > 0:
                 testCorrect_o += (pred[iOt].argmax(1) == y[iOt]).type(torch.float).sum().item()
 
+            if args.multiTask and args.classifyComp:
+
+                iC0 = (yComp == 0).nonzero(as_tuple=True)
+                iC1 = (yComp == 1).nonzero(as_tuple=True)
+                iC2 = (yComp == 2).nonzero(as_tuple=True)
+                iC3 = (yComp == 3).nonzero(as_tuple=True)
+                iC4 = (yComp == 4).nonzero(as_tuple=True)
+    
+                total_c0 += yComp[iC0].size(dim=0)
+                total_c1 += yComp[iC1].size(dim=0)
+                total_c2 += yComp[iC2].size(dim=0)
+                total_c3 += yComp[iC3].size(dim=0)
+                total_c4 += yComp[iC4].size(dim=0)
+    
+                testCompCorrect += (pred_comp.argmax(1) == yComp).type(torch.float).sum().item() 
+                if yComp[iC0].size(dim=0) > 0:
+                    testCorrect_c0 += (pred_comp[iC0].argmax(1) == yComp[iC0]).type(torch.float).sum().item()
+                if yComp[iC1].size(dim=0) > 0:
+                    testCorrect_c1 += (pred_comp[iC1].argmax(1) == yComp[iC1]).type(torch.float).sum().item()
+                if yComp[iC2].size(dim=0) > 0:
+                    testCorrect_c2 += (pred_comp[iC2].argmax(1) == yComp[iC2]).type(torch.float).sum().item()
+                if yComp[iC3].size(dim=0) > 0:
+                    testCorrect_c3 += (pred_comp[iC3].argmax(1) == yComp[iC3]).type(torch.float).sum().item()
+                if yComp[iC4].size(dim=0) > 0:
+                    testCorrect_c4 += (pred_comp[iC4].argmax(1) == yComp[iC4]).type(torch.float).sum().item()
+
             tstep += 1
             gc.collect()
             
-    #avgTestLoss = totalTestLoss / testSteps
-    #testAcc = testCorrect / len(dataloader.dataset)
     avgTestLoss = totalTestLoss / tstep
     testAcc = testCorrect / (tstep*dataloader.batch_size)
     testAcc_e = testCorrect_e / total_e if (total_e > 0) else -1.
@@ -331,15 +396,24 @@ def test(dataloader, n_batches=-1):
     if args.multiTask:
       avgClassLoss = totalClassLoss / tstep
       avgCompLoss = totalCompLoss / tstep
-      testRMSE = sqrt( totalErrorSqSum / (tstep*dataloader.batch_size) )
+      if args.classifyComp:
+        testCompAcc = testCompCorrect / (tstep*dataloader.batch_size)
+        testCompAcc_c0 = testCorrect_c0 / total_c0 if (total_c0 > 0) else -1.
+        testCompAcc_c1 = testCorrect_c1 / total_c1 if (total_c1 > 0) else -1.
+        testCompAcc_c2 = testCorrect_c2 / total_c2 if (total_c2 > 0) else -1.
+        testCompAcc_c3 = testCorrect_c3 / total_c3 if (total_c3 > 0) else -1.
+        testCompAcc_c4 = testCorrect_c4 / total_c4 if (total_c4 > 0) else -1.
+      else:
+        testRMSE = sqrt( totalErrorSqSum / (tstep*dataloader.batch_size) )
 
     if args.multiTask:
+      if args.classifyComp:
+        return avgTestLoss, avgClassLoss, testAcc, testAcc_e, testAcc_ph, testAcc_mu, testAcc_pi, testAcc_pr, testAcc_o, avgCompLoss, testCompAcc, testCompAcc_c0, testCompAcc_c1, testCompAcc_c2, testCompAcc_c3, testCompAcc_c4 
       return avgTestLoss, avgClassLoss, testAcc, testAcc_e, testAcc_ph, testAcc_mu, testAcc_pi, testAcc_pr, testAcc_o, avgCompLoss, testRMSE
     return avgTestLoss, testAcc, testAcc_e, testAcc_ph, testAcc_mu, testAcc_pi, testAcc_pr, testAcc_o
 
 
 
-#def train(train_dataloader, test_dataloader, model, loss_fn, optimizer, step, logStep, epoch):
 def train(train_dataloader, test_dataloader, step, logStep, epoch):
 
     model.train()
@@ -355,16 +429,20 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
       totalClassLoss = 0.
       totalCompLoss = 0.
       totalErrorSqSum = 0.
+      trainCompCorrect = 0
     
     start = time.time()
     for batch, (X,y) in enumerate(train_dataloader):
         dataloading_time += time.time() - start
         if args.multiTask:
-            yReg = y[1]
+            if args.classifyComp:
+                yComp = y[1].type(torch.LongTensor)
+            else:
+                yComp = y[1]
             y = y[0].type(torch.LongTensor)
-            X, y, yReg = X.to(args.device), y.to(args.device), yReg.to(args.device)
+            X, y, yComp = X.to(args.device), y.to(args.device), yComp.to(args.device)
             outputs = model(X)
-            losses, loss, lossWeights = lossMulti(outputs, [y, yReg])
+            losses, loss, lossWeights = lossMulti(outputs, [y, yComp])
             pred = outputs[0]
             pred_comp = outputs[1]
         elif args.softLabels:
@@ -377,7 +455,6 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
             y = y.type(torch.LongTensor)
             X, y = X.to(args.device), y.to(args.device)
             pred = model(X)
-            #loss = loss_fn(pred, y)
             loss = lossFn(pred, y)
         
         optimizer.zero_grad()
@@ -397,22 +474,39 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
             lossCompVal = losses[1].detach().item()
             lossWClassVal = lossWeights[0].detach().item()
             lossWCompVal = lossWeights[1].detach().item()
-            batchErrorSqSum = torch.square(torch.sub(yReg, pred_comp)).sum().item()
             totalClassLoss += lossClassVal
             totalCompLoss += lossCompVal
-            totalErrorSqSum += batchErrorSqSum
-            batchRMSE = sqrt(batchErrorSqSum / train_dataloader.batch_size)
+            if args.classifyComp:
+                batchCompCorrect = (pred_comp.argmax(1) == yComp).type(torch.float).sum().item()
+                trainCompCorrect += batchCompCorrect
+                batchCompAcc = batchCompCorrect / train_dataloader.batch_size
+            else:
+                batchErrorSqSum = torch.square(torch.sub(yComp, pred_comp)).sum().item()
+                totalErrorSqSum += batchErrorSqSum
+                batchRMSE = sqrt(batchErrorSqSum / train_dataloader.batch_size)
 
         if step % args.log_frequency == 0:
             print("reached training batch %i of %i"%(step, trainSteps), flush=True)
             if args.multiTask:
-                #valLoss, valClassLoss, valAcc, valAcc_e, valAcc_ph, valAcc_mu, valAcc_pi, valAcc_pr, valAcc_o, valCompLoss, valRMSE = test(test_dataloader, model, loss_fn, args.n_val_batches)
+              if args.classifyComp:
+                valLoss, valClassLoss, valAcc, valAcc_e, valAcc_ph, valAcc_mu, valAcc_pi, valAcc_pr, valAcc_o, valCompLoss, valCompAcc, valCompAcc_c0, valCompAcc_c1, valCompAcc_c2, valCompAcc_c3, valCompAcc_c4  = test(test_dataloader, args.n_val_batches)
+              else:
                 valLoss, valClassLoss, valAcc, valAcc_e, valAcc_ph, valAcc_mu, valAcc_pi, valAcc_pr, valAcc_o, valCompLoss, valRMSE = test(test_dataloader, args.n_val_batches)
             else:
-                #valLoss, valAcc, valAcc_e, valAcc_ph, valAcc_mu, valAcc_pi, valAcc_pr, valAcc_o = test(test_dataloader, model, loss_fn, args.n_val_batches)
                 valLoss, valAcc, valAcc_e, valAcc_ph, valAcc_mu, valAcc_pi, valAcc_pr, valAcc_o = test(test_dataloader, args.n_val_batches)
             if not args.noLogs:
               if args.multiTask:
+                if args.classifyComp:
+                  wandb.log({"train_loss": lossVal, "train_class_loss": lossClassVal, "train_comp_loss": lossCompVal,
+                             "train_class_acc": batchAcc, "train_comp_rmse": batchRMSE,
+                             "val_loss": valLoss, "val_class_loss": valClassLoss, "val_comp_loss": valCompLoss,
+                             "val_acc": valAcc, "val_electron_acc": valAcc_e, "val_photon_acc": valAcc_ph,
+                             "val_muon_acc": valAcc_mu, "val_pion_acc": valAcc_pi, "val_proton_acc": valAcc_pr,
+                             "val_comp_acc": valCompAcc, "val_c0_acc": valCompAcc_c0, "val_c1_acc": valCompAcc_c1, 
+                             "val_c2_acc": valCompAcc_c2, "val_c3_acc": valCompAcc_c3, "val_c4_acc": valCompAcc_c4, 
+                             "class_loss_weight": lossWClassVal, "comp_loss_weight":lossWCompVal,
+                             "epoch": epoch, "step": step}, step=logStep)
+                else:
                   wandb.log({"train_loss": lossVal, "train_class_loss": lossClassVal, "train_comp_loss": lossCompVal,
                              "train_class_acc": batchAcc, "train_comp_rmse": batchRMSE,
                              "val_loss": valLoss, "val_class_loss": valClassLoss, "val_comp_loss": valCompLoss,
@@ -445,12 +539,17 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
     if args.multiTask:
       avgClassLoss = totalClassLoss /  trainSteps
       avgCompLoss = totalCompLoss / trainSteps
-      trainRMSE = sqrt( totalErrorSqSum / len(train_dataloader.dataset) )
+      if args.classifyComp:
+        trainCompAcc = trainCompCorrect / len(train_dataloader.dataset)
+      else:
+        trainRMSE = sqrt( totalErrorSqSum / len(train_dataloader.dataset) )
     
     print("total time spent loading data:   ", dataloading_time, flush=True)
     print("total time spent doing backprop: ", backprop_time, flush=True)
 
     if args.multiTask:
+      if args.classifyComp:
+        return step, logStep, avgTrainLoss, avgClassLoss, trainAcc, avgCompLoss, trainCompAcc
       return step, logStep, avgTrainLoss, avgClassLoss, trainAcc, avgCompLoss, trainRMSE
     return step, logStep, avgTrainLoss, trainAcc
 
@@ -460,19 +559,28 @@ logStep = args.startLogStep
 
 for e in range(args.startEpoch, args.epochs+args.startEpoch):
   if args.multiTask:
-    #step, logStep, trL, trClL, trA, trCoL, trRMSE = train(train_dataloader, test_dataloader, model, lossFn, optimizer, step, logStep, e)
-    #teL, teClL, teA, teA_e, teA_ph, teA_mu, teA_pi, teA_pr, teA_o, teCoL, teRMSE = test(test_dataloader, model, lossFn)
-    step, logStep, trL, trClL, trA, trCoL, trRMSE = train(train_dataloader, test_dataloader, step, logStep, e)
-    teL, teClL, teA, teA_e, teA_ph, teA_mu, teA_pi, teA_pr, teA_o, teCoL, teRMSE = test(test_dataloader)
-    print("EPOCH:", e, " train total loss:", trL, " train class loss:", trClL, " train comp loss:", trCoL,
-          " train class accuracy:", trA, " train comp RMSE:", trRMSE,
-          " test total loss:", teL, " test class loss:", teClL, "test comp loss:", teCoL,
-          " test class accuracy:", teA, " test comp RMSE:", teRMSE,
-          " electron test accuracy:", teA_e, " photon test accuracy:", teA_ph, " muon test accuracy:", teA_mu,
-          " pion test accuracy:", teA_pi, " proton test accuracy:", teA_pr, " other test accuracy:", teA_o, flush=True)
+    if args.classifyComp:
+      step, logStep, trL, trClL, trA, trCoL, trCmpA = train(train_dataloader, test_dataloader, step, logStep, e)
+      teL, teClL, teA, teA_e, teA_ph, teA_mu, teA_pi, teA_pr, teA_o, teCoL, teCoA, teCoA0, teCoA1, teCoA2, teCoA3, teCoA4 = test(test_dataloader)
+      print("EPOCH:", e, " train total loss:", trL, " train class loss:", trClL, " train comp loss:", trCoL,
+            " train class accuracy:", trA, " train comp accuracy:", trCmpA,
+            " test total loss:", teL, " test class loss:", teClL, "test comp loss:", teCoL,
+            " test class accuracy:", teA, " electron test accuracy:", teA_e, " photon test accuracy:", teA_ph,
+            " muon test accuracy:", teA_mu, " pion test accuracy:", teA_pi, " proton test accuracy:", teA_pr,
+            " other test accuracy:", teA_o, "test comp accuracy:", teCoA, "test comp class0 accuracy:", teCoA0,
+            "test comp class1 accuracy:", teCoA1, "test comp class2 accuracy:", teCoA2,
+            "test comp class3 accuracy:", teCoA3, "test comp class4 accuracy:", teCoA4, flush=True)
+    else:
+      step, logStep, trL, trClL, trA, trCoL, trRMSE = train(train_dataloader, test_dataloader, step, logStep, e)
+      teL, teClL, teA, teA_e, teA_ph, teA_mu, teA_pi, teA_pr, teA_o, teCoL, teRMSE = test(test_dataloader)
+      print("EPOCH:", e, " train total loss:", trL, " train class loss:", trClL, " train comp loss:", trCoL,
+            " train class accuracy:", trA, " train comp RMSE:", trRMSE,
+            " test total loss:", teL, " test class loss:", teClL, "test comp loss:", teCoL,
+            " test class accuracy:", teA, " test comp RMSE:", teRMSE,
+            " electron test accuracy:", teA_e, " photon test accuracy:", teA_ph, " muon test accuracy:", teA_mu,
+            " pion test accuracy:", teA_pi, " proton test accuracy:", teA_pr, " other test accuracy:", teA_o,
+            flush=True)
   else:
-    #step, logStep, trL, trA = train(train_dataloader, test_dataloader, model, lossFn, optimizer, step, logStep, e)
-    #teL, teA, teA_e, teA_ph, teA_mu, teA_pi, teA_pr, teA_o = test(test_dataloader, model, lossFn)
     step, logStep, trL, trA = train(train_dataloader, test_dataloader, step, logStep, e)
     teL, teA, teA_e, teA_ph, teA_mu, teA_pi, teA_pr, teA_o = test(test_dataloader)
     print("EPOCH:", e, " train loss:",trL, " train accuracy:", trA, " test loss:", teL, " test accuracy:", teA,
