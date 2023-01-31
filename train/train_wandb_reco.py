@@ -212,7 +212,7 @@ lossMSE = nn.MSELoss()
 
 class MultiTaskLossClCmp(nn.Module):
   def __init__(self):
-    super(MultiTaskLoss, self).__init__()
+    super(MultiTaskLossClCmp, self).__init__()
     self.etaC = nn.Parameter(torch.Tensor([0.5]))
     self.etaR = nn.Parameter(torch.Tensor([0.5]))
   def forward(self, outputs, targets):
@@ -309,8 +309,8 @@ def test(dataloader, n_batches=-1):
                 X, y, yComp = X.to(args.device), y.to(args.device), yComp.to(args.device)
                 outputs = model(X)
                 losses, loss, lossWeights = lossMulti(outputs, [y, yComp])
-                pred = outputs[0]
-                pred_comp = outputs[1]
+                pred = outputs[0].to(args.device)
+                pred_comp = outputs[1].to(args.device)
                 totalTestLoss += loss.detach().item()
                 totalClassLoss += losses[0].detach().item()
                 totalCompLoss += losses[1].detach().item()
@@ -443,8 +443,8 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
             X, y, yComp = X.to(args.device), y.to(args.device), yComp.to(args.device)
             outputs = model(X)
             losses, loss, lossWeights = lossMulti(outputs, [y, yComp])
-            pred = outputs[0]
-            pred_comp = outputs[1]
+            pred = outputs[0].to(args.device)
+            pred_comp = outputs[1].to(args.device)
         elif args.softLabels:
             target = y
             y = y.argmax(1)
@@ -498,7 +498,7 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
               if args.multiTask:
                 if args.classifyComp:
                   wandb.log({"train_loss": lossVal, "train_class_loss": lossClassVal, "train_comp_loss": lossCompVal,
-                             "train_class_acc": batchAcc, "train_comp_rmse": batchRMSE,
+                             "train_class_acc": batchAcc, "train_comp_acc": batchCompAcc,
                              "val_loss": valLoss, "val_class_loss": valClassLoss, "val_comp_loss": valCompLoss,
                              "val_acc": valAcc, "val_electron_acc": valAcc_e, "val_photon_acc": valAcc_ph,
                              "val_muon_acc": valAcc_mu, "val_pion_acc": valAcc_pi, "val_proton_acc": valAcc_pr,

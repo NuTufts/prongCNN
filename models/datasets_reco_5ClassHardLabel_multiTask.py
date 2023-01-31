@@ -37,7 +37,7 @@ def getCompClass(c):
     return 1
   if c < 0.6:
     return 2
-  if c < 0.8
+  if c < 0.8:
     return 3
   return 4
 

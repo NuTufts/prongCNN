@@ -56,7 +56,7 @@ if args.use6class and args.softLabels:
 
 nClasses = 5
 if args.multiTask:
-    from datasets_reco_5ClassHardLabel_multiTask import ProngDataset, ProngDatasetClCmp, mean, std
+    from datasets_reco_5ClassHardLabel_multiTask import ProngDataset, ProngDatasetClCmp, mean, std, getCompClass
 elif args.use6class:
     from datasets_reco import ProngDataset, ProngDatasetPl2, mean, std, meanPl2, stdPl2, ProngDatasetNoMask, ProngDatasetPl2NoMask, mean_nm, std_nm, meanPl2_nm, stdPl2_nm
     nClasses = 6
@@ -116,7 +116,12 @@ else:
         model = nn.DataParallel(model)
 
 
-model.load_state_dict(torch.load(args.model_path))
+#model.load_state_dict(torch.load(args.model_path))
+checkpoint = torch.load(args.model_path)
+try:
+  model.load_state_dict(checkpoint['model_state_dict'])
+except:
+  model.module.load_state_dict(checkpoint['model_state_dict'])
 model.to(args.device)
 model.eval()
 
@@ -127,6 +132,14 @@ class classCounter:
     def __init__(self):
         self.n = 0
         self.n_match = [0,0,0,0,0,0]
+    def update(self, match):
+        self.n += 1
+        self.n_match[match] += 1
+
+class fiveClassCounter:
+    def __init__(self):
+        self.n = 0
+        self.n_match = [0,0,0,0,0]
     def update(self, match):
         self.n += 1
         self.n_match[match] += 1
@@ -152,25 +165,34 @@ def test(dataloader, model):
     testSteps = len(dataloader.dataset) // dataloader.batch_size
     tstep = 0
     
-    effCounts = {0: classCounter(), 1: classCounter(), 2: classCounter(), 3: classCounter(), 4: classCounter(), 5: classCounter()} 
-    purCounts = {0: classCounter(), 1: classCounter(), 2: classCounter(), 3: classCounter(), 4: classCounter(), 5: classCounter()} 
+    effCounts = {0: classCounter(), 1: classCounter(), 2: classCounter(),
+                 3: classCounter(), 4: classCounter(), 5: classCounter()} 
+    purCounts = {0: classCounter(), 1: classCounter(), 2: classCounter(),
+                 3: classCounter(), 4: classCounter(), 5: classCounter()} 
+
+    effCountsComp = {0: fiveClassCounter(), 1: fiveClassCounter(), 2: fiveClassCounter(),
+                     3: fiveClassCounter(), 4: fiveClassCounter()} 
+    purCountsComp = {0: fiveClassCounter(), 1: fiveClassCounter(), 2: fiveClassCounter(),
+                     3: fiveClassCounter(), 4: fiveClassCounter()} 
 
     with torch.no_grad():
         
         for batch, (X, y) in enumerate(dataloader):
-            if tstep % 1000 == 0:
+            if tstep % 10 == 0:
                 print("reached validation batch %i of %i"%(tstep, testSteps), flush=True)
             if args.multiTask:
-                if args.classifyComp:
-                    yComp = y[1].type(torch.LongTensor)
-                else:
-                    yComp = y[1]
-                    #yCompCl = []
-                y = y[0].type(torch.LongTensor)
-                X, y, yComp = X.to(args.device), y.to(args.device), yComp.to(args.device)
+                X = X.to(args.device)
                 outputs = model(X)
                 pred = outputs[0]
                 pred_comp = outputs[1]
+                if args.classifyComp:
+                  yComp = y[1].type(torch.LongTensor)
+                  yComp_pred = pred_comp.argmax(1)
+                else:
+                  yComp = torch.LongTensor([getCompClass(y[1][i].item()) for i in range(y[1].size(0))])
+                  yComp_pred = torch.LongTensor([getCompClass(pred_comp[i].item()) for i in range(pred_comp.size(0))])
+                y = y[0].type(torch.LongTensor)
+                y, yComp, yComp_pred = y.to(args.device), yComp.to(args.device), yComp_pred.to(args.device)
             elif args.softLabels:
                 y = y.argmax(1)
                 X, y = X.to(args.device), y.to(args.device)
@@ -184,6 +206,10 @@ def test(dataloader, model):
             for i in range(y.size(0)):
               effCounts[y[i].item()].update(y_pred[i].item())
               purCounts[y_pred[i].item()].update(y[i].item())
+
+            for i in range(yComp.size(0)):
+              effCountsComp[yComp[i].item()].update(yComp_pred[i].item())
+              purCountsComp[yComp_pred[i].item()].update(yComp[i].item())
             
             iEl = (y == 0).nonzero(as_tuple=True)
             iPh = (y == 1).nonzero(as_tuple=True)
@@ -225,15 +251,16 @@ def test(dataloader, model):
     if total_o > 0:
         testAcc_o = testCorrect_o / total_o
     
-    return testAcc, testAcc_e, testAcc_ph, testAcc_mu, testAcc_pi, testAcc_pr, testAcc_o, effCounts, purCounts
+    return testAcc, testAcc_e, testAcc_ph, testAcc_mu, testAcc_pi, testAcc_pr, testAcc_o, effCounts, purCounts, effCountsComp, purCountsComp
 
 
 
 
 
-teA, teA_e, teA_ph, teA_mu, teA_pi, teA_pr, teA_o, effCounts, purCounts = test(dataloader, model)
+teA, teA_e, teA_ph, teA_mu, teA_pi, teA_pr, teA_o, effCounts, purCounts, effCountsComp, purCountsComp = test(dataloader, model)
 print("test accuracy:", teA, " electron test accuracy:", teA_e, " photon test accuracy:", teA_ph, " muon test accuracy:", teA_mu, " pion test accuracy:", teA_pi, " proton test accuracy:", teA_pr, " other test accuracy:", teA_o, flush=True)
 
+print("PARTICLE CLASSIFICATION RESULTS:")
 for i in range(6):
     print("true class %i matches (%i instances):"%(i, effCounts[i].n))
     for j in range(5):
@@ -247,6 +274,25 @@ for i in range(6):
         ratio = 0.
         if purCounts[i].n > 0:
             ratio = purCounts[i].n_match[j]/purCounts[i].n
+        print("    %i: %f"%(j, ratio))
+
+print()
+print()
+
+print("COMPLETENESS CLASSIFICATION RESULTS:")
+for i in range(5):
+    print("true class %i matches (%i instances):"%(i, effCountsComp[i].n))
+    for j in range(5):
+        ratio = 0.
+        if effCountsComp[i].n > 0:
+            ratio = effCountsComp[i].n_match[j]/effCountsComp[i].n
+        print("    %i: %f"%(j, ratio))
+for i in range(5):
+    print("pred class %i matches (%i instances):"%(i, purCountsComp[i].n))
+    for j in range(5):
+        ratio = 0.
+        if purCountsComp[i].n > 0:
+            ratio = purCountsComp[i].n_match[j]/purCountsComp[i].n
         print("    %i: %f"%(j, ratio))
 
 
