@@ -111,7 +111,10 @@ else:
     if args.resnet18:
         model = ResNet18(layer0inChans, ResBlock, outputs=nClasses)
     else:
-        model = ResNet34(layer0inChans, ResBlock, outputs=nClasses)
+        if args.multiTask and args.classifyComp:
+            model = ResNet34ClCmp(layer0inChans, ResBlock, outputs=nClasses)
+        else:
+            model = ResNet34(layer0inChans, ResBlock, outputs=nClasses)
     if not args.singleGPU:
         model = nn.DataParallel(model)
 
