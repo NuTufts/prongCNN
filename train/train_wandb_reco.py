@@ -214,7 +214,7 @@ lossMSE = nn.MSELoss()
 
 class MultiTaskLossHardWeight(nn.Module):
   def __init__(self):
-    super(MultiTaskLossClCmp, self).__init__()
+    super(MultiTaskLossHardWeight, self).__init__()
     self.w_class = args.partLossWeight
     self.w_reg = (1.0 - args.partLossWeight)
   def forward(self, outputs, targets):
