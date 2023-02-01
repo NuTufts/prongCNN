@@ -53,8 +53,10 @@ parser.add_argument("-sC", "--startCheckpoint", type=str, default="", help="path
 parser.add_argument("-m", "--model_path", type=str, default="/home/mrosenberg/prongCNN/ResNet34_recoProng_b32_plAll.pt", help="model name")
 parser.add_argument("-p", "--projectName", type=str, default="prongCNN-5particle-recoProngs-multiTask", help="wandb project name")
 parser.add_argument("-r", "--runName", type=str, default="DEFAULT", help="wandb run name")
+parser.add_argument("-wLP", "--partLossWeight", type=float, default=0.5, help="weight for particle classification in multi task loss (must specify --multiTask and --hardWeights)")
 parser.add_argument("--multiTask", action="store_true", help="do particle classification and completeness regression")
 parser.add_argument("--classifyComp", action="store_true", help="do classification instead of regression for completeness")
+parser.add_argument("--hardWeights", action="store_true", help="use hard coded task weights for multi task loss")
 parser.add_argument("--use6class", action="store_true", help="use 6 classes (include other label)")
 parser.add_argument("--softLabels", action="store_true", help="use soft labels for loss")
 parser.add_argument("--noMask", action="store_true", help="only use prong pixels")
@@ -210,6 +212,17 @@ lossFn = nn.NLLLoss(weight=class_weights) #use if softmax is in model
 
 lossMSE = nn.MSELoss()
 
+class MultiTaskLossHardWeight(nn.Module):
+  def __init__(self):
+    super(MultiTaskLossClCmp, self).__init__()
+    self.w_class = args.partLossWeight
+    self.w_reg = (1.0 - args.partLossWeight)
+  def forward(self, outputs, targets):
+    loss_class = lossFn(outputs[0], targets[0])
+    loss_reg = lossMSE(outputs[1], targets[1])
+    loss_total = self.w_class*loss_class + self.w_reg*loss_reg
+    return [loss_class, loss_reg], loss_total, [self.w_class, self.w_reg]
+
 class MultiTaskLossClCmp(nn.Module):
   def __init__(self):
     super(MultiTaskLossClCmp, self).__init__()
@@ -233,12 +246,15 @@ class MultiTaskLoss(nn.Module):
     return [loss_class, loss_reg], loss_total, [self.etaC, self.etaR]
 
 if args.multiTask:
-  if args.classifyComp:
+  if args.hardWeights:
+    lossMulti = MultiTaskLossHardWeight().to(args.device)
+  elif args.classifyComp:
     lossMulti = MultiTaskLossClCmp().to(args.device)
   else:
     lossMulti = MultiTaskLoss().to(args.device)
-  optimizer = AdamW(list(lossMulti.parameters())+list(model.parameters()), lr=args.learning_rate)
 
+if args.multiTask and not args.hardWeights:
+  optimizer = AdamW(list(lossMulti.parameters())+list(model.parameters()), lr=args.learning_rate)
 else:
   optimizer = AdamW(model.parameters(), lr=args.learning_rate)
 
@@ -472,8 +488,9 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
         if args.multiTask:
             lossClassVal = losses[0].detach().item()
             lossCompVal = losses[1].detach().item()
-            lossWClassVal = lossWeights[0].detach().item()
-            lossWCompVal = lossWeights[1].detach().item()
+            if not args.hardWeights:
+                lossWClassVal = lossWeights[0].detach().item()
+                lossWCompVal = lossWeights[1].detach().item()
             totalClassLoss += lossClassVal
             totalCompLoss += lossCompVal
             if args.classifyComp:
@@ -505,6 +522,14 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
                              "val_comp_acc": valCompAcc, "val_c0_acc": valCompAcc_c0, "val_c1_acc": valCompAcc_c1, 
                              "val_c2_acc": valCompAcc_c2, "val_c3_acc": valCompAcc_c3, "val_c4_acc": valCompAcc_c4, 
                              "class_loss_weight": lossWClassVal, "comp_loss_weight":lossWCompVal,
+                             "epoch": epoch, "step": step}, step=logStep)
+                elif args.hardWeights:
+                  wandb.log({"train_loss": lossVal, "train_class_loss": lossClassVal, "train_comp_loss": lossCompVal,
+                             "train_class_acc": batchAcc, "train_comp_rmse": batchRMSE,
+                             "val_loss": valLoss, "val_class_loss": valClassLoss, "val_comp_loss": valCompLoss,
+                             "val_acc": valAcc, "val_comp_rmse": valRMSE,
+                             "val_electron_acc": valAcc_e, "val_photon_acc": valAcc_ph, "val_muon_acc": valAcc_mu,
+                             "val_pion_acc": valAcc_pi, "val_proton_acc": valAcc_pr,
                              "epoch": epoch, "step": step}, step=logStep)
                 else:
                   wandb.log({"train_loss": lossVal, "train_class_loss": lossClassVal, "train_comp_loss": lossCompVal,
