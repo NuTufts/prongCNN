@@ -57,6 +57,7 @@ parser.add_argument("-wLP", "--partLossWeight", type=float, default=0.5, help="w
 parser.add_argument("--multiTask", action="store_true", help="do particle classification and completeness regression")
 parser.add_argument("--deepMLP", action="store_true", help="use 3 layer MLPs for output tasks")
 parser.add_argument("--deepMLPwBN", action="store_true", help="use 3 layer MLPs with batch norm for output tasks")
+parser.add_argument("--deepMLPwIN", action="store_true", help="use 3 layer MLPs with instance norm for output tasks")
 parser.add_argument("--classifyComp", action="store_true", help="do classification instead of regression for completeness")
 parser.add_argument("--hardWeights", action="store_true", help="use hard coded task weights for multi task loss")
 parser.add_argument("--use6class", action="store_true", help="use 6 classes (include other label)")
@@ -72,11 +73,11 @@ args = parser.parse_args()
 if args.multiTask and (args.l0inChans != 2 or args.use6class or args.softLabels or args.noMask or args.plane2only or args.resnet18):
   sys.exit("multiTask training only configured for 5 class hard labels with mask (3 plane, 2 in channel config.) with ResNet34")
 
-if ((args.deepMLP or args.deepMLPwBN) and not args.multiTask) or ((args.deepMLP or args.deepMLPwBN) and (args.classifyComp or args.hardWeights)):
-  sys.exit("deepMLP and deepMLPwBN options are only implemented for multi task config. with completeness regression and learnable loss weights")
+if ((args.deepMLP or args.deepMLPwBN or args.deepMLPwIN) and not args.multiTask) or ((args.deepMLP or args.deepMLPwBN or args.deepMLPwIN) and (args.classifyComp or args.hardWeights)):
+  sys.exit("deepMLP options are only implemented for multi task config. with completeness regression and learnable loss weights")
 
 if args.multiTask:
-  from models_instanceNorm_reco_2chan_multiTask import ResBlock, ResNet34, ResNet34ClCmp, ResNet34DeepMLP, ResNet34DeepMLPwBN
+  from models_instanceNorm_reco_2chan_multiTask import ResBlock, ResNet34, ResNet34ClCmp, ResNet34DeepMLP, ResNet34DeepMLPwBN, ResNet34DeepMLPwIN
 elif args.noMask:
   from models_instanceNorm import ResBlock, ResNet18, ResNet18Pl2, ResNet34, ResNet34Pl2
 elif args.l0inChans == 1:
@@ -177,6 +178,8 @@ else:
                 model = ResNet34DeepMLP(layer0inChans, ResBlock, outputs=nClasses)
             elif args.deepMLPwBN:
                 model = ResNet34DeepMLPwBN(layer0inChans, ResBlock, outputs=nClasses)
+            elif args.deepMLPwIN:
+                model = ResNet34DeepMLPwIN(layer0inChans, ResBlock, outputs=nClasses)
             else:
                 model = ResNet34(layer0inChans, ResBlock, outputs=nClasses)
         else:
