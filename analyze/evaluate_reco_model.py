@@ -210,9 +210,10 @@ def test(dataloader, model):
               effCounts[y[i].item()].update(y_pred[i].item())
               purCounts[y_pred[i].item()].update(y[i].item())
 
-            for i in range(yComp.size(0)):
-              effCountsComp[yComp[i].item()].update(yComp_pred[i].item())
-              purCountsComp[yComp_pred[i].item()].update(yComp[i].item())
+            if args.multiTask:
+              for i in range(yComp.size(0)):
+                effCountsComp[yComp[i].item()].update(yComp_pred[i].item())
+                purCountsComp[yComp_pred[i].item()].update(yComp[i].item())
             
             iEl = (y == 0).nonzero(as_tuple=True)
             iPh = (y == 1).nonzero(as_tuple=True)
