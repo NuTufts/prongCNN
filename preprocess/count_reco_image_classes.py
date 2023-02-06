@@ -7,6 +7,7 @@ from array import array
 
 parser = argparse.ArgumentParser("Count Reco Prong CNN Image Classes")
 parser.add_argument("-f", "--infile", required=True, type=str, help="input prongCNN images root file")
+parser.add_argument("--writeOutput", action="store_true", help="write output to root file")
 args = parser.parse_args()
 
 f = rt.TFile(args.infile)
@@ -42,20 +43,21 @@ def getPIDClass(pid):
     return 5
   return 6
 
-outFile = rt.TFile("count_reco_image_classes_plots.root","RECREATE")
-prongTree = rt.TTree("ProngTree","ProngTree")
-puritySum = array('f', [0.])
-prongTree.Branch("puritySum", puritySum, 'puritySum/F')
-puritySum5Class = array('f', [0.])
-prongTree.Branch("puritySum5Class", puritySum5Class, 'puritySum5Class/F')
-domPartPDG = array('i', [0])
-prongTree.Branch("domPartPDG", domPartPDG, 'domPartPDG/I')
-domPartPurity = array('f', [0.])
-prongTree.Branch("domPartPurity", domPartPurity, 'domPartPurity/F')
-pdg = array('i', [0])
-prongTree.Branch("pdg", pdg, 'pdg/I')
-purity = array('f',[0.])
-prongTree.Branch("purity", purity, 'purity/F')
+if args.writeOutput:
+  outFile = rt.TFile("count_reco_image_classes_plots.root","RECREATE")
+  prongTree = rt.TTree("ProngTree","ProngTree")
+  puritySum = array('f', [0.])
+  prongTree.Branch("puritySum", puritySum, 'puritySum/F')
+  puritySum5Class = array('f', [0.])
+  prongTree.Branch("puritySum5Class", puritySum5Class, 'puritySum5Class/F')
+  domPartPDG = array('i', [0])
+  prongTree.Branch("domPartPDG", domPartPDG, 'domPartPDG/I')
+  domPartPurity = array('f', [0.])
+  prongTree.Branch("domPartPurity", domPartPurity, 'domPartPurity/F')
+  pdg = array('i', [0])
+  prongTree.Branch("pdg", pdg, 'pdg/I')
+  purity = array('f',[0.])
+  prongTree.Branch("purity", purity, 'purity/F')
 
 nProngs = 0
 classCounters = [0,0,0,0,0,0]
@@ -86,18 +88,20 @@ for e in range(t.GetEntries()):
     puritySumEq1 += 1
   else:
     puritySumGr1 += 1
-  puritySum[0] = pSum
-  puritySum5Class[0] = pSum5Class
-  domPartPDG[0] = pMaxPDG
-  domPartPurity[0] = pMax
-  pdg[0] = t.pdg
-  purity[0] = t.purity
-  prongTree.Fill()
+  if args.writeOutput:
+    puritySum[0] = pSum
+    puritySum5Class[0] = pSum5Class
+    domPartPDG[0] = pMaxPDG
+    domPartPurity[0] = pMax
+    pdg[0] = t.pdg
+    purity[0] = t.purity
+    prongTree.Fill()
   nProngs += 1
 
-outFile.cd()
-prongTree.Write("",rt.TObject.kOverwrite)
-outFile.Close()
+if args.writeOutput:
+  outFile.cd()
+  prongTree.Write("",rt.TObject.kOverwrite)
+  outFile.Close()
 
 print("n prongs:", nProngs)
 print("n electrons:", classCounters[0])
