@@ -498,12 +498,24 @@ class ResNet34DeepMLPwIN(nn.Module):
 
         X = torch.cat((X0, X1, X2), 1)
 
-        Xclass = nn.ReLU()(self.classIN1(self.fcClass1(X)))
-        Xclass = nn.ReLU()(self.classIN2(self.fcClass2(Xclass)))
+        #Xclass = nn.ReLU()(self.classIN1(self.fcClass1(X)))
+        Xclass = self.fcClass1(X)
+        Xclass = self.classIN1(torch.reshape(Xclass, (Xclass.shape[0],1,1024)))
+        Xclass = nn.ReLU()(torch.reshape(Xclass, (Xclass.shape[0],1024)))
+        #Xclass = nn.ReLU()(self.classIN2(self.fcClass2(Xclass)))
+        Xclass = self.fcClass2(Xclass)
+        Xclass = self.classIN2(torch.reshape(Xclass, (Xclass.shape[0],1,512)))
+        Xclass = nn.ReLU()(torch.reshape(Xclass, (Xclass.shape[0],512)))
         Xclass = self.fcClass3(Xclass)
 
-        Xreg = nn.ReLU()(self.regIN1(self.fcReg1(X)))
-        Xreg = nn.ReLU()(self.regIN2(self.fcReg2(Xreg)))
+        #Xreg = nn.ReLU()(self.regIN1(self.fcReg1(X)))
+        Xreg = self.fcReg1(X)
+        Xreg = self.regIN1(torch.reshape(Xreg, (Xreg.shape[0],1,1024)))
+        Xreg = nn.ReLU()(torch.reshape(Xreg, (Xreg.shape[0],1024)))
+        #Xreg = nn.ReLU()(self.regIN2(self.fcReg2(Xreg)))
+        Xreg = self.fcReg2(Xreg)
+        Xreg = self.regIN2(torch.reshape(Xreg, (Xreg.shape[0],1,512)))
+        Xreg = nn.ReLU()(torch.reshape(Xreg, (Xreg.shape[0],512)))
         Xreg = self.fcReg3(Xreg)
 
         outputs = [self.logSoftmax(Xclass), nn.Sigmoid()(Xreg).squeeze()]
