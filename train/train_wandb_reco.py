@@ -19,6 +19,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
+from torch.optim.lr_scheduler import StepLR, OneCycleLR, CyclicLR, CosineAnnealingWarmRestarts
 import torchvision.transforms as transforms
 
 import matplotlib.pyplot as plt
@@ -38,7 +39,16 @@ parser.add_argument("-bt", "--batch_size_train", type=int, default=32, help="tra
 parser.add_argument("-bv", "--batch_size_val", type=int, default=32, help="validation batch size")
 parser.add_argument("-nbv", "--n_val_batches", type=int, default=10, help="number of batches to process for validation steps")
 parser.add_argument("-f", "--log_frequency", type=int, default=100, help="log progress every this number of training steps")
-parser.add_argument("-l", "--learning_rate", type=float, default=1e-3, help="learning rate")
+parser.add_argument("-l", "--learning_rate", type=float, default=1e-3, help="learning rate (constant or initial for Step, OneCycle, and CosinAnnealingWarmRestarts LR schedulers)")
+parser.add_argument("--schedStepLR", action="store_true", help="use a step learning rate scheduler")
+parser.add_argument("--schedCyclicLR", action="store_true", help="use a cyclic learning rate scheduler")
+parser.add_argument("--schedCosAnnealWRLR", action="store_true", help="use cosine annealing warm restarts learning rate scheduler")
+parser.add_argument("--schedOneCycleLR", action="store_true", help="use one cycle with cosine annealing learning rate scheduler")
+parser.add_argument("-lrS", "--schedLRStepSize", type=int, default=10, help="set cycle/period IN EPOCHS for change in learning rate when using a learning rate scheduler option")
+parser.add_argument("-lrB", "--schedLRBase", type=float, default=1e-8, help="base (minimum) learning rate for oscillatory LR schedulers")
+parser.add_argument("-lrM", "--schedLRMax", type=float, default=1e-2, help="maximum learning rate for oscillatory and one cycle LR schedulers")
+parser.add_argument("-slrG", "--stepLRGamma", type=float, default=0.1, help="decrease learning rate by this factor after schedLRStepSize epochs with step LR scheduler")
+parser.add_argument("-clrM", "--cyclicLRMode", type=str, default="exp_range", help="mode for cyclic learning rate scheduler")
 parser.add_argument("-e", "--epochs", type=int, default=10, help="number of training epochs")
 parser.add_argument("-sE", "--startEpoch", type=int, default=1, help="first epoch number (change if continuing run)")
 parser.add_argument("-sTS", "--startTrainStep", type=int, default=0, help="initial training step number (change if continuing run)")
@@ -59,12 +69,14 @@ parser.add_argument("--hardWeights", action="store_true", help="use hard coded t
 parser.add_argument("--use6class", action="store_true", help="use 6 classes (include other label)")
 parser.add_argument("--softLabels", action="store_true", help="use soft labels for loss")
 parser.add_argument("--noMask", action="store_true", help="only use prong pixels")
-parser.add_argument("--dropLast", action="store_true", help="drop the last training batch in every epoch")
+parser.add_argument("--keepLast", action="store_true", help="don't drop the last training batch in every epoch. this could mess up the learning rate schedulers")
 parser.add_argument("--plane2only", action="store_true", help="only use collection plane images")
 parser.add_argument("--resnet18", action="store_true", help="use ResNet18 instead of ResNet34")
 parser.add_argument("--singleGPU", action="store_true", help="only use one GPU")
 parser.add_argument("--noLogs", action="store_true", help="don't upload to wandb")
 args = parser.parse_args()
+
+dropLast = not args.keepLast
 
 if args.multiTask and (args.l0inChans != 2 or args.use6class or args.softLabels or args.noMask or args.plane2only or args.resnet18):
   sys.exit("multiTask training only configured for 5 class hard labels with mask (3 plane, 2 in channel config.) with ResNet34")
@@ -130,7 +142,7 @@ if args.plane2only:
     else:
       train_dataset = ProngDatasetPl2(args.train_file, transformations=train_transform, clip=4.0)
       test_dataset = ProngDatasetPl2(args.val_file, transformations=test_transform, clip=4.0)
-    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size_train, drop_last=args.dropLast, shuffle=True, num_workers=args.num_workers)
+    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size_train, drop_last=dropLast, shuffle=True, num_workers=args.num_workers)
     test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size_val, drop_last=False, shuffle=True, num_workers=args.num_workers)
 
     if args.resnet18:
@@ -161,7 +173,7 @@ else:
       else:
         train_dataset = ProngDataset(args.train_file, transformations=train_transform, clip=4.0)
         test_dataset = ProngDataset(args.val_file, transformations=test_transform, clip=4.0)
-    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size_train, drop_last=args.dropLast, shuffle=True, num_workers=args.num_workers)
+    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size_train, drop_last=dropLast, shuffle=True, num_workers=args.num_workers)
     test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size_val, drop_last=False, shuffle=True, num_workers=args.num_workers)
 
     if args.resnet18:
@@ -280,7 +292,17 @@ if args.startCheckpoint != "":
     model.module.load_state_dict(checkpoint['model_state_dict'])
   optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
-
+useNonStepScheduler = args.schedCyclicLR or args.schedCosAnnealWRLR or args.schedOneCycleLR
+itersPerEpoch = len(train_dataloader.dataset) // train_dataloader.batch_size
+lrStepSizeEpoch = args.schedLRStepSize * itersPerEpoch
+if args.schedStepLR:
+  scheduler = StepLR(optimizer, step_size=args.schedLRStepSize, gamma=args.stepLRGamma)
+elif args.schedCyclicLR:
+  scheduler = CyclicLR(optimizer, mode=args.cyclicLRMode, step_size_up=lrStepSizeEpoch, base_lr=args.schedLRBase, max_lr=args.schedLRMax, cycle_momentum=False)
+elif args.schedCosAnnealWRLR:
+  scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=lrStepSizeEpoch, eta_min=args.schedLRBase)
+elif args.schedOneCycleLR:
+  scheduler = OneCycleLR(optimizer, max_lr=args.schedLRMax, steps_per_epoch=itersPerEpoch, epochs=args.epochs, anneal_strategy='cos')
 
 
 
@@ -525,6 +547,9 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
             else:
                 valLoss, valAcc, valAcc_e, valAcc_ph, valAcc_mu, valAcc_pi, valAcc_pr, valAcc_o = test(test_dataloader, args.n_val_batches)
             if not args.noLogs:
+              currentLR = args.learning_rate
+              if args.schedStepLR or useNonStepScheduler:
+                currentLR = scheduler.get_last_lr()[0]
               if args.multiTask:
                 if args.classifyComp:
                   wandb.log({"train_loss": lossVal, "train_class_loss": lossClassVal, "train_comp_loss": lossCompVal,
@@ -535,7 +560,7 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
                              "val_comp_acc": valCompAcc, "val_c0_acc": valCompAcc_c0, "val_c1_acc": valCompAcc_c1, 
                              "val_c2_acc": valCompAcc_c2, "val_c3_acc": valCompAcc_c3, "val_c4_acc": valCompAcc_c4, 
                              "class_loss_weight": lossWClassVal, "comp_loss_weight":lossWCompVal,
-                             "epoch": epoch, "step": step}, step=logStep)
+                             "epoch": epoch, "step": step, "learning_rate": currentLR}, step=logStep)
                 elif args.hardWeights:
                   wandb.log({"train_loss": lossVal, "train_class_loss": lossClassVal, "train_comp_loss": lossCompVal,
                              "train_class_acc": batchAcc, "train_comp_rmse": batchRMSE,
@@ -543,7 +568,7 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
                              "val_acc": valAcc, "val_comp_rmse": valRMSE,
                              "val_electron_acc": valAcc_e, "val_photon_acc": valAcc_ph, "val_muon_acc": valAcc_mu,
                              "val_pion_acc": valAcc_pi, "val_proton_acc": valAcc_pr,
-                             "epoch": epoch, "step": step}, step=logStep)
+                             "epoch": epoch, "step": step, "learning_rate": currentLR}, step=logStep)
                 else:
                   wandb.log({"train_loss": lossVal, "train_class_loss": lossClassVal, "train_comp_loss": lossCompVal,
                              "train_class_acc": batchAcc, "train_comp_rmse": batchRMSE,
@@ -552,23 +577,25 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
                              "val_electron_acc": valAcc_e, "val_photon_acc": valAcc_ph, "val_muon_acc": valAcc_mu,
                              "val_pion_acc": valAcc_pi, "val_proton_acc": valAcc_pr,
                              "class_loss_weight": lossWClassVal, "comp_loss_weight":lossWCompVal,
-                             "epoch": epoch, "step": step}, step=logStep)
+                             "epoch": epoch, "step": step, "learning_rate": currentLR}, step=logStep)
               elif args.use6class:
                   wandb.log({"train_loss": lossVal, "train_acc": batchAcc, "val_loss": valLoss, "val_acc": valAcc,
                              "val_electron_acc": valAcc_e, "val_photon_acc": valAcc_ph, "val_muon_acc": valAcc_mu,
                              "val_pion_acc": valAcc_pi, "val_proton_acc": valAcc_pr, "val_other_acc": valAcc_o, 
-                             "epoch": epoch, "step": step}, step=logStep)
+                             "epoch": epoch, "step": step, "learning_rate": currentLR}, step=logStep)
               else:
                   wandb.log({"train_loss": lossVal, "train_acc": batchAcc, "val_loss": valLoss, "val_acc": valAcc,
                              "val_electron_acc": valAcc_e, "val_photon_acc": valAcc_ph, "val_muon_acc": valAcc_mu,
                              "val_pion_acc": valAcc_pi, "val_proton_acc": valAcc_pr,
-                             "epoch": epoch, "step": step}, step=logStep)
+                             "epoch": epoch, "step": step, "learning_rate": currentLR}, step=logStep)
             logStep += 1
             model.train()
             if args.multiTask:
                 lossMulti.train()
 
         step += 1
+        if useNonStepScheduler:
+          scheduler.step()
         gc.collect()
         start = time.time()
         
@@ -627,5 +654,7 @@ for e in range(args.startEpoch, args.epochs+args.startEpoch):
   torch.save({'model_state_dict': model.state_dict(), 
               'optimizer_state_dict': optimizer.state_dict()},
              args.model_path.replace(".pt", "_epoch%i.pt"%e))
+  if args.schedStepLR:
+    scheduler.step()
 
 
