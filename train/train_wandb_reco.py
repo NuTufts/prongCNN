@@ -13,13 +13,13 @@ from sklearn.utils.class_weight import compute_class_weight
 import time
 import random
 
-from math import sqrt
+from math import sqrt, log10
 
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import StepLR, OneCycleLR, CyclicLR, CosineAnnealingWarmRestarts
+from torch.optim.lr_scheduler import StepLR, OneCycleLR, CyclicLR, CosineAnnealingWarmRestarts, LambdaLR
 import torchvision.transforms as transforms
 
 import matplotlib.pyplot as plt
@@ -39,7 +39,7 @@ parser.add_argument("-bt", "--batch_size_train", type=int, default=32, help="tra
 parser.add_argument("-bv", "--batch_size_val", type=int, default=32, help="validation batch size")
 parser.add_argument("-nbv", "--n_val_batches", type=int, default=10, help="number of batches to process for validation steps")
 parser.add_argument("-f", "--log_frequency", type=int, default=100, help="log progress every this number of training steps")
-parser.add_argument("-l", "--learning_rate", type=float, default=1e-3, help="learning rate (constant or initial for Step, OneCycle, and CosinAnnealingWarmRestarts LR schedulers)")
+parser.add_argument("-l", "--learning_rate", type=float, default=1e-3, help="learning rate (constant or initial for Step, OneCycle, CosinAnnealingWarmRestarts, and custom cyclic with log_triangular and log_triangular2 LR schedulers)")
 parser.add_argument("--schedStepLR", action="store_true", help="use a step learning rate scheduler")
 parser.add_argument("--schedCyclicLR", action="store_true", help="use a cyclic learning rate scheduler")
 parser.add_argument("--schedCosAnnealWRLR", action="store_true", help="use cosine annealing warm restarts learning rate scheduler")
@@ -48,7 +48,7 @@ parser.add_argument("-lrS", "--schedLRStepSize", type=int, default=10, help="set
 parser.add_argument("-lrB", "--schedLRBase", type=float, default=1e-8, help="base (minimum) learning rate for oscillatory LR schedulers")
 parser.add_argument("-lrM", "--schedLRMax", type=float, default=1e-2, help="maximum learning rate for oscillatory and one cycle LR schedulers")
 parser.add_argument("-slrG", "--stepLRGamma", type=float, default=0.1, help="decrease learning rate by this factor after schedLRStepSize epochs with step LR scheduler")
-parser.add_argument("-clrM", "--cyclicLRMode", type=str, default="exp_range", help="mode for cyclic learning rate scheduler")
+parser.add_argument("-clrM", "--cyclicLRMode", type=str, default="triangular", help="mode for cyclic learning rate scheduler (triangular, triangular2, and exp_range for built-in pytorch schedulers; log_triangular, log_triangular2 for custom")
 parser.add_argument("-e", "--epochs", type=int, default=10, help="number of training epochs")
 parser.add_argument("-sE", "--startEpoch", type=int, default=1, help="first epoch number (change if continuing run)")
 parser.add_argument("-sTS", "--startTrainStep", type=int, default=0, help="initial training step number (change if continuing run)")
@@ -77,6 +77,9 @@ parser.add_argument("--noLogs", action="store_true", help="don't upload to wandb
 args = parser.parse_args()
 
 dropLast = not args.keepLast
+
+step = args.startTrainStep
+logStep = args.startLogStep
 
 if args.multiTask and (args.l0inChans != 2 or args.use6class or args.softLabels or args.noMask or args.plane2only or args.resnet18):
   sys.exit("multiTask training only configured for 5 class hard labels with mask (3 plane, 2 in channel config.) with ResNet34")
@@ -294,13 +297,21 @@ if args.startCheckpoint != "":
 
 useNonStepScheduler = args.schedCyclicLR or args.schedCosAnnealWRLR or args.schedOneCycleLR
 itersPerEpoch = len(train_dataloader.dataset) // train_dataloader.batch_size
-lrStepSizeEpoch = args.schedLRStepSize * itersPerEpoch
+lrStepSize = args.schedLRStepSize * itersPerEpoch
 if args.schedStepLR:
   scheduler = StepLR(optimizer, step_size=args.schedLRStepSize, gamma=args.stepLRGamma)
 elif args.schedCyclicLR:
-  scheduler = CyclicLR(optimizer, mode=args.cyclicLRMode, step_size_up=lrStepSizeEpoch, base_lr=args.schedLRBase, max_lr=args.schedLRMax, cycle_momentum=False)
+  if args.cyclicLRMode in ["log_triangular","log_triangular2"]:
+    ascending = False
+    nCycles = args.epochs // (args.schedLRStepSize*2)
+    schedLRMax = args.schedLRMax
+    schedLRBase = args.schedLRBase
+    lambda1 = lambda x: 10**(((log10(schedLRMax/schedLRBase))/lrStepSize)*(x % lrStepSize)) if ascending else               10**((-(log10(schedLRMax/schedLRBase))/lrStepSize)*(x % lrStepSize) + log10(schedLRMax/schedLRBase))
+    scheduler = LambdaLR(optimizer, lr_lambda=lambda1)
+  else:
+    scheduler = CyclicLR(optimizer, mode=args.cyclicLRMode, step_size_up=lrStepSize, base_lr=args.schedLRBase, max_lr=args.schedLRMax, cycle_momentum=False)
 elif args.schedCosAnnealWRLR:
-  scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=lrStepSizeEpoch, eta_min=args.schedLRBase)
+  scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=lrStepSize, eta_min=args.schedLRBase)
 elif args.schedOneCycleLR:
   scheduler = OneCycleLR(optimizer, max_lr=args.schedLRMax, steps_per_epoch=itersPerEpoch, epochs=args.epochs, anneal_strategy='cos')
 
@@ -538,7 +549,7 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
                 batchRMSE = sqrt(batchErrorSqSum / train_dataloader.batch_size)
 
         if step % args.log_frequency == 0:
-            print("reached training batch %i of %i"%(step, trainSteps), flush=True)
+            print("reached training batch %i of %i"%(batch, trainSteps), flush=True)
             if args.multiTask:
               if args.classifyComp:
                 valLoss, valClassLoss, valAcc, valAcc_e, valAcc_ph, valAcc_mu, valAcc_pi, valAcc_pr, valAcc_o, valCompLoss, valCompAcc, valCompAcc_c0, valCompAcc_c1, valCompAcc_c2, valCompAcc_c3, valCompAcc_c4  = test(test_dataloader, args.n_val_batches)
@@ -549,7 +560,7 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
             if not args.noLogs:
               currentLR = args.learning_rate
               if args.schedStepLR or useNonStepScheduler:
-                currentLR = scheduler.get_last_lr()[0]
+                currentLR = optimizer.param_groups[0]["lr"]
               if args.multiTask:
                 if args.classifyComp:
                   wandb.log({"train_loss": lossVal, "train_class_loss": lossClassVal, "train_comp_loss": lossCompVal,
@@ -619,10 +630,13 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
     return step, logStep, avgTrainLoss, trainAcc
 
 
-step = args.startTrainStep
-logStep = args.startLogStep
-
 for e in range(args.startEpoch, args.epochs+args.startEpoch):
+  if args.cyclicLRMode in ["log_triangular","log_triangular2"]:
+    if (e - 1) % args.schedLRStepSize == 0:
+      ascending = not ascending
+      if e > 1 and ascending and args.cyclicLRMode == "log_triangular2":
+        schedLRMax = (args.schedLRBase/args.schedLRMax)**(1./(nCycles))*schedLRMax
+      optimizer.param_groups[0]["lr"] = lambda1(step)*args.learning_rate #override bug when switching directions
   if args.multiTask:
     if args.classifyComp:
       step, logStep, trL, trClL, trA, trCoL, trCmpA = train(train_dataloader, test_dataloader, step, logStep, e)
