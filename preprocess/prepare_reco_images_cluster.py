@@ -134,6 +134,13 @@ def getMCProngParticle(sparseimg_vv, mcpg, mcpm, adc_v):
   return maxPartPDG, maxPartTID, totNodePixI, maxPartI/totalPixI, maxPartComp, pdglist, puritylist
 
 
+def goodTrack(track):
+  nTrajPoints = track.NumberTrajectoryPoints()
+  if nTrajPoints < 2:
+    return False
+  return (getDistance(track.Vertex(), track.End()) > 1e-6)
+
+
 def checkCompleteness(flowTriples, adc_v, thrumu_v, prongCluster, cropPt, 
                       mcpm, mcTID, truePixSum, bestComp):
   prong_vv = flowTriples.make_cropped_initial_sparse_prong_image_reco(adc_v, thrumu_v,
@@ -158,6 +165,8 @@ def getBestOtherCompleteness(vertices, vID, tID, sID, flowTriples, adc_v,
   for iV, vertex in enumerate(vertices):
     for iT, prongCluster in enumerate(vertex.track_hitcluster_v):
       if iV == vID and iT == tID:
+        continue
+      if not goodTrack(vertex.track_v[iT]):
         continue
       cropPt = vertex.track_v[iT].End()
       bestComp = checkCompleteness(flowTriples, adc_v, thrumu_v, prongCluster, cropPt,
@@ -383,6 +392,9 @@ for filepair in filepairs:
 
     #++++++ begin track loop ++++++++++++++++++++++++++++++++++++++++++++++++++=
     for iT in range(nuVertex.track_hitcluster_v.size()):
+
+      if not goodTrack(nuVertex.track_v[iT]):
+        continue
 
       cropPt = nuVertex.track_v[iT].End()
       prong_vv = flowTriples.make_cropped_initial_sparse_prong_image_reco(adc_v, thrumu_v,
