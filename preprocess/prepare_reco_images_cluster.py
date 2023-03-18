@@ -184,12 +184,14 @@ def getTruePartInfo(ioll, trackid, pdg):
   for mctrack in mctracks:
     if mctrack.TrackID() == trackid and mctrack.PdgCode() == pdg:
       mctrackSCE = truthTrackSCE.applySCE(mctrack)
-      return mctrack.Start().E(), getTheta(mctrack.Start()), getDistToEdge(mctrackSCE.Vertex())
+      edgeDistance = getDistToEdge(mctrackSCE.Vertex()) if (mctrackSCE.Vertex() != None) else -9999.
+      return mctrack.Start().E(), getTheta(mctrack.Start()), edgeDistance
   mcshowers = ioll.get_data(larlite.data.kMCShower, "mcreco")
   for mcshower in mcshowers:
     if mcshower.TrackID() == trackid and mcshower.PdgCode() == pdg:
       mcshowerSCE = truthShowerTrunkSCE.applySCE(mcshower)
-      return mcshower.Start().E(), getTheta(mcshower.Start()), getDistToEdge(mcshowerSCE.Vertex())
+      edgeDistance = getDistToEdge(mcshowerSCE.Vertex()) if (mcshowerSCE.Vertex() != None) else -9999.
+      return mcshower.Start().E(), getTheta(mcshower.Start()), edgeDistance
   return -99., -1., -9999.
       
 
