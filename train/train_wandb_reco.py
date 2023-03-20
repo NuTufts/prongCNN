@@ -651,13 +651,13 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
               currentLR = args.learning_rate
               if args.schedStepLR or useNonStepScheduler:
                 currentLR = optimizer.param_groups[0]["lr"]
-              if args.TripleTask:
+              if args.tripleTask:
                 wandb.log({"train_loss": lossVal, "train_class_loss": lossClassVal, "train_class_acc": batchAcc,
                            "train_comp_loss": lossCompVal, "train_comp_rmse": batchCompRMSE,
                            "train_purity_loss": lossPurVal, "train_purity_rmse": batchPurRMSE,
-                           "val_loss": valLoss, "val_class_loss": valClassLoss, "val_class_acc": valAcc,
+                           "val_loss": valLoss, "val_class_loss": valClassLoss, "val_acc": valAcc,
                            "val_comp_loss": valCompLoss, "val_comp_rmse": valCompRMSE,
-                           "val_purity_loss": valPurLoss, "val_comp_rmse": valPurRMSE,
+                           "val_purity_loss": valPurLoss, "val_purity_rmse": valPurRMSE,
                            "val_electron_acc": valAcc_e, "val_photon_acc": valAcc_ph, "val_muon_acc": valAcc_mu,
                            "val_pion_acc": valAcc_pi, "val_proton_acc": valAcc_pr, "class_loss_weight": lossWClassVal,
                            "comp_loss_weight":lossWCompVal, "purity_loss_weight":lossWPurVal,
