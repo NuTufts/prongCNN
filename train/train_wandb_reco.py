@@ -284,7 +284,7 @@ class MultiTaskLoss(nn.Module):
 
 class TripleTaskLoss(nn.Module):
   def __init__(self):
-    super(MultiTaskLoss, self).__init__()
+    super(TripleTaskLoss, self).__init__()
     self.etaC = nn.Parameter(torch.Tensor([0.5]))
     self.etaRc = nn.Parameter(torch.Tensor([0.5]))
     self.etaRp = nn.Parameter(torch.Tensor([0.5]))
@@ -292,8 +292,7 @@ class TripleTaskLoss(nn.Module):
     loss_class = lossFn(outputs[0], targets[0])
     loss_comp = lossMSEcomp(outputs[1], targets[1])
     loss_pur = lossMSEpur(outputs[2], targets[2])
-    loss_total = 2.0*torch.exp(-self.etaC)*loss_class + torch.exp(-self.etaRc)*loss_comp +
-                 torch.exp(-self.etaRp)*loss_pur + self.etaC + self.etaRc + self.etaRp
+    loss_total = 2.0*torch.exp(-self.etaC)*loss_class + torch.exp(-self.etaRc)*loss_comp + torch.exp(-self.etaRp)*loss_pur + self.etaC + self.etaRc + self.etaRp
     return [loss_class, loss_comp, loss_pur], loss_total, [self.etaC, self.etaRc, self.etaRp]
 
 
