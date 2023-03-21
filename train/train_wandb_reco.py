@@ -613,7 +613,7 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
             batchCompErrorSqSum = torch.square(torch.sub(yComp, pred_comp)).sum().item()
             totalCompErrorSqSum += batchCompErrorSqSum
             batchCompRMSE = sqrt(batchCompErrorSqSum / train_dataloader.batch_size)
-            batchPurErrorSqSum = torch.square(torch.sub(yPur, pred_comp)).sum().item()
+            batchPurErrorSqSum = torch.square(torch.sub(yPur, pred_pur)).sum().item()
             totalPurErrorSqSum += batchPurErrorSqSum
             batchPurRMSE = sqrt(batchPurErrorSqSum / train_dataloader.batch_size)
             lossWClassVal = lossWeights[0].detach().item()
