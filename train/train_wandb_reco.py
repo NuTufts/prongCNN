@@ -261,10 +261,10 @@ class MultiTaskLossHardWeight(nn.Module):
     return [loss_class, loss_reg], loss_total, [self.w_class, self.w_reg]
 
 class MultiTaskLossClCmp(nn.Module):
-  def __init__(self):
+  def __init__(self, wC=0.5, wR=0.5):
     super(MultiTaskLossClCmp, self).__init__()
-    self.etaC = nn.Parameter(torch.Tensor([0.5]))
-    self.etaR = nn.Parameter(torch.Tensor([0.5]))
+    self.etaC = nn.Parameter(torch.Tensor([wC]))
+    self.etaR = nn.Parameter(torch.Tensor([wR]))
   def forward(self, outputs, targets):
     loss_class = lossFn(outputs[0], targets[0])
     loss_comp = lossFnComp(outputs[1], targets[1])
@@ -272,10 +272,10 @@ class MultiTaskLossClCmp(nn.Module):
     return [loss_class, loss_comp], loss_total, [self.etaC, self.etaR]
 
 class MultiTaskLoss(nn.Module):
-  def __init__(self):
+  def __init__(self, wC=0.5, wR=0.5):
     super(MultiTaskLoss, self).__init__()
-    self.etaC = nn.Parameter(torch.Tensor([0.5]))
-    self.etaR = nn.Parameter(torch.Tensor([0.5]))
+    self.etaC = nn.Parameter(torch.Tensor([wC]))
+    self.etaR = nn.Parameter(torch.Tensor([wR]))
   def forward(self, outputs, targets):
     loss_class = lossFn(outputs[0], targets[0])
     loss_reg = lossMSEcomp(outputs[1], targets[1])
@@ -283,11 +283,11 @@ class MultiTaskLoss(nn.Module):
     return [loss_class, loss_reg], loss_total, [self.etaC, self.etaR]
 
 class TripleTaskLoss(nn.Module):
-  def __init__(self):
+  def __init__(self, wC=0.5, wRc=0.5, wRp=0.5):
     super(TripleTaskLoss, self).__init__()
-    self.etaC = nn.Parameter(torch.Tensor([0.5]))
-    self.etaRc = nn.Parameter(torch.Tensor([0.5]))
-    self.etaRp = nn.Parameter(torch.Tensor([0.5]))
+    self.etaC = nn.Parameter(torch.Tensor([wC]))
+    self.etaRc = nn.Parameter(torch.Tensor([wRc]))
+    self.etaRp = nn.Parameter(torch.Tensor([wRp]))
   def forward(self, outputs, targets):
     loss_class = lossFn(outputs[0], targets[0])
     loss_comp = lossMSEcomp(outputs[1], targets[1])
@@ -296,16 +296,27 @@ class TripleTaskLoss(nn.Module):
     return [loss_class, loss_comp, loss_pur], loss_total, [self.etaC, self.etaRc, self.etaRp]
 
 
+initialLossWeights = [0.5, 0.5, 0.5]
+if args.startCheckpoint != "":
+  checkpoint = torch.load(args.startCheckpoint)
+  if args.multiTask:
+    initialLossWeights[0] = checkpoint['weight_state_dict']['etaC']
+    initialLossWeights[1] = checkpoint['weight_state_dict']['etaR']
+  if args.tripleTask:
+    initialLossWeights[0] = checkpoint['weight_state_dict']['etaC']
+    initialLossWeights[1] = checkpoint['weight_state_dict']['etaRc']
+    initialLossWeights[2] = checkpoint['weight_state_dict']['etaRp']
+
 if args.tripleTask:
-  lossMulti = TripleTaskLoss().to(args.device)
+  lossMulti = TripleTaskLoss(initialLossWeights[0], initialLossWeights[1], initialLossWeights[2]).to(args.device)
 
 if args.multiTask:
   if args.hardWeights:
     lossMulti = MultiTaskLossHardWeight().to(args.device)
   elif args.classifyComp:
-    lossMulti = MultiTaskLossClCmp().to(args.device)
+    lossMulti = MultiTaskLossClCmp(initialLossWeights[0], initialLossWeights[1]).to(args.device)
   else:
-    lossMulti = MultiTaskLoss().to(args.device)
+    lossMulti = MultiTaskLoss(initialLossWeights[0], initialLossWeights[1]).to(args.device)
 
 if (args.multiTask and not args.hardWeights) or args.tripleTask:
   optimizer = AdamW(list(lossMulti.parameters())+list(model.parameters()), lr=args.learning_rate)
@@ -314,7 +325,6 @@ else:
 
 
 if args.startCheckpoint != "":
-  checkpoint = torch.load(args.startCheckpoint)
   try:
     model.load_state_dict(checkpoint['model_state_dict'])
   except:
@@ -788,10 +798,25 @@ for e in range(args.startEpoch, args.epochs+args.startEpoch):
     print("EPOCH:", e, " train loss:",trL, " train accuracy:", trA, " test loss:", teL, " test accuracy:", teA,
           " electron test accuracy:", teA_e, " photon test accuracy:", teA_ph, " muon test accuracy:", teA_mu,
           " pion test accuracy:", teA_pi, " proton test accuracy:", teA_pr, " other test accuracy:", teA_o, flush=True)
-  torch.save({'model_state_dict': model.state_dict(), 
-              'optimizer_state_dict': optimizer.state_dict()},
-             args.model_path.replace(".pt", "_epoch%i.pt"%e))
+  if args.multiTask:
+    weight_state_dict = {'etaC': lossMulti.etaC, 'etaR': lossMulti.etaR}
+    torch.save({'model_state_dict': model.state_dict(), 
+                'optimizer_state_dict': optimizer.state_dict(),
+                'weight_state_dict': weight_state_dict},
+               args.model_path.replace(".pt", "_epoch%i.pt"%e))
+  elif args.tripleTask:
+    weight_state_dict = {'etaC': lossMulti.etaC, 'etaRc': lossMulti.etaRc, 'etaRp': lossMulti.etaRp}
+    torch.save({'model_state_dict': model.state_dict(), 
+                'optimizer_state_dict': optimizer.state_dict(),
+                'weight_state_dict': weight_state_dict},
+               args.model_path.replace(".pt", "_epoch%i.pt"%e))
+  else:
+    torch.save({'model_state_dict': model.state_dict(), 
+                'optimizer_state_dict': optimizer.state_dict()},
+               args.model_path.replace(".pt", "_epoch%i.pt"%e))
   if args.schedStepLR:
     scheduler.step()
 
+print("last training step: ", step)
+print("last log step: ", logStep)
 
