@@ -799,13 +799,16 @@ for e in range(args.startEpoch, args.epochs+args.startEpoch):
           " electron test accuracy:", teA_e, " photon test accuracy:", teA_ph, " muon test accuracy:", teA_mu,
           " pion test accuracy:", teA_pi, " proton test accuracy:", teA_pr, " other test accuracy:", teA_o, flush=True)
   if args.multiTask:
-    weight_state_dict = {'etaC': lossMulti.etaC, 'etaR': lossMulti.etaR}
+    weight_state_dict = {'etaC': lossMulti.etaC.detach().item(),
+                         'etaR': lossMulti.etaR.detach().item()}
     torch.save({'model_state_dict': model.state_dict(), 
                 'optimizer_state_dict': optimizer.state_dict(),
                 'weight_state_dict': weight_state_dict},
                args.model_path.replace(".pt", "_epoch%i.pt"%e))
   elif args.tripleTask:
-    weight_state_dict = {'etaC': lossMulti.etaC, 'etaRc': lossMulti.etaRc, 'etaRp': lossMulti.etaRp}
+    weight_state_dict = {'etaC': lossMulti.etaC.detach().item(),
+                         'etaRc': lossMulti.etaRc.detach().item(),
+                         'etaRp': lossMulti.etaRp.detach().item()}
     torch.save({'model_state_dict': model.state_dict(), 
                 'optimizer_state_dict': optimizer.state_dict(),
                 'weight_state_dict': weight_state_dict},
