@@ -21,6 +21,7 @@ parser.add_argument("-n", "--num_workers", type=int, default=12, help="number of
 parser.add_argument("-b", "--batch_size", type=int, default=1, help="validation batch size")
 parser.add_argument("-c", "--l0inChans", type=int, default=2, help="number of input channels for first conv layer")
 parser.add_argument("--multiTask", action="store_true", help="do particle classification and completeness regression")
+parser.add_argument("--tripleTask", action="store_true", help="do particle classification and completeness and purity regression")
 parser.add_argument("--classifyComp", action="store_true", help="do classification instead of regression for completeness")
 parser.add_argument("--use6class", action="store_true", help="use 6 classes (include other label)")
 parser.add_argument("--softLabels", action="store_true", help="use soft labels for loss")
@@ -33,7 +34,12 @@ args = parser.parse_args()
 if args.multiTask and (args.l0inChans != 2 or args.use6class or args.softLabels or args.noMask or args.plane2only or args.resnet18):
   sys.exit("multiTask training only configured for 5 class hard labels with mask (3 plane, 2 in channel config.) with ResNet34")
 
-if args.multiTask:
+if args.tripleTask and (args.l0inChans != 2 or args.use6class or args.softLabels or args.noMask or args.plane2only or args.resnet18 or args.hardWeights or args.multiTask):
+  sys.exit("tripleTask training only configured for 5 class hard labels with mask (3 plane, 2 in channel config.) with ResNet34 and learnable loss weights")
+
+if args.tripleTask:
+  from models_instanceNorm_reco_2chan_tripleTask import ResBlock, ResNet34
+elif args.multiTask:
   from models_instanceNorm_reco_2chan_multiTask import ResBlock, ResNet34, ResNet34ClCmp
 elif args.noMask:
   from models_instanceNorm import ResBlock, ResNet18, ResNet18Pl2, ResNet34, ResNet34Pl2
@@ -49,7 +55,10 @@ if args.use6class and args.softLabels:
   sys.exit("modules not configured for 6 class soft labels")
 
 nClasses = 5
-if args.multiTask:
+if args.tripleTask:
+  from datasets_reco_5ClassHardLabel_tripleTask import ProngDataset, mean, std
+  from datasets_reco_5ClassHardLabel_multiTask import getCompClass
+elif args.multiTask:
     from datasets_reco_5ClassHardLabel_multiTask import ProngDataset, ProngDatasetClCmp, mean, std, getCompClass
 elif args.use6class:
     from datasets_reco import ProngDataset, ProngDatasetPl2, mean, std, meanPl2, stdPl2, ProngDatasetNoMask, ProngDatasetPl2NoMask, mean_nm, std_nm, meanPl2_nm, stdPl2_nm
@@ -172,16 +181,25 @@ def test(dataloader, model):
     purCountsComp = {0: fiveClassCounter(), 1: fiveClassCounter(), 2: fiveClassCounter(),
                      3: fiveClassCounter(), 4: fiveClassCounter()} 
 
+    effCountsPur = {0: fiveClassCounter(), 1: fiveClassCounter(), 2: fiveClassCounter(),
+                     3: fiveClassCounter(), 4: fiveClassCounter()} 
+    purCountsPur = {0: fiveClassCounter(), 1: fiveClassCounter(), 2: fiveClassCounter(),
+                     3: fiveClassCounter(), 4: fiveClassCounter()} 
+
     with torch.no_grad():
         
         for batch, (X, y) in enumerate(dataloader):
             if tstep % 10 == 0:
                 print("reached validation batch %i of %i"%(tstep, testSteps), flush=True)
-            if args.multiTask:
+            if args.multiTask or args.tripleTask:
                 X = X.to(args.device)
                 outputs = model(X)
                 pred = outputs[0]
                 pred_comp = outputs[1]
+                if args.tripleTask:
+                  pred_pur = outputs[2]
+                  yPur = torch.LongTensor([getCompClass(y[2][i].item()) for i in range(y[1].size(0))])
+                  yPur_pred = torch.LongTensor([getCompClass(pred_pur[i].item()) for i in range(pred_pur.size(0))])
                 if args.classifyComp:
                   yComp = y[1].type(torch.LongTensor)
                   yComp_pred = pred_comp.argmax(1)
@@ -204,10 +222,14 @@ def test(dataloader, model):
               effCounts[y[i].item()].update(y_pred[i].item())
               purCounts[y_pred[i].item()].update(y[i].item())
 
-            if args.multiTask:
+            if args.multiTask or args.tripleTask:
               for i in range(yComp.size(0)):
                 effCountsComp[yComp[i].item()].update(yComp_pred[i].item())
                 purCountsComp[yComp_pred[i].item()].update(yComp[i].item())
+              if args.tripleTask:
+                for i in range(yPur.size(0)):
+                  effCountsPur[yPur[i].item()].update(yPur_pred[i].item())
+                  purCountsPur[yPur_pred[i].item()].update(yPur[i].item())
             
             iEl = (y == 0).nonzero(as_tuple=True)
             iPh = (y == 1).nonzero(as_tuple=True)
@@ -249,7 +271,7 @@ def test(dataloader, model):
     if total_o > 0:
         testAcc_o = testCorrect_o / total_o
     
-    return testAcc, testAcc_e, testAcc_ph, testAcc_mu, testAcc_pi, testAcc_pr, testAcc_o, effCounts, purCounts, effCountsComp, purCountsComp
+    return testAcc, testAcc_e, testAcc_ph, testAcc_mu, testAcc_pi, testAcc_pr, testAcc_o, effCounts, purCounts, effCountsComp, purCountsComp, effCountsPur, purCountsPur
 
 
 
@@ -292,5 +314,25 @@ for i in range(5):
         if purCountsComp[i].n > 0:
             ratio = purCountsComp[i].n_match[j]/purCountsComp[i].n
         print("    %i: %f"%(j, ratio))
+
+print()
+print()
+
+print("PURITY CLASSIFICATION RESULTS:")
+for i in range(5):
+    print("true class %i matches (%i instances):"%(i, effCountsPur[i].n))
+    for j in range(5):
+        ratio = 0.
+        if effCountsPur[i].n > 0:
+            ratio = effCountsPur[i].n_match[j]/effCountsPur[i].n
+        print("    %i: %f"%(j, ratio))
+for i in range(5):
+    print("pred class %i matches (%i instances):"%(i, purCountsPur[i].n))
+    for j in range(5):
+        ratio = 0.
+        if purCountsPur[i].n > 0:
+            ratio = purCountsPur[i].n_match[j]/purCountsPur[i].n
+        print("    %i: %f"%(j, ratio))
+
 
 
