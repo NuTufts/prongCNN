@@ -4,6 +4,7 @@ import argparse
 import random
 
 import numpy as np
+import pickle
 
 import torch
 from torch import nn
@@ -12,7 +13,7 @@ import torchvision.transforms as transforms
 
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__)))+'/models')
 from models_instanceNorm_reco_2chan_tripleTask_forSHAP import ResBlock, ResNet34
-from datasets_reco_5ClassHardLabel_tripleTask import ProngDataset, mean, std
+from datasets_reco_5ClassHardLabel_tripleTask_forSHAP import ProngDataset, mean, std
 
 import shap
 
@@ -33,11 +34,16 @@ args = parser.parse_args()
 
 device = torch.device('cpu')
 
+if ".pdf" not in args.output:
+  sys.exit("output filename should end in .pdf because I'm to lazy to fix my search and replace kludge")
+
+outpdf_00 = matplotlib.backends.backend_pdf.PdfPages(args.output.replace(".pdf","_shapMax00.pdf"))
 outpdf_01 = matplotlib.backends.backend_pdf.PdfPages(args.output.replace(".pdf","_shapMax01.pdf"))
 outpdf_05 = matplotlib.backends.backend_pdf.PdfPages(args.output.replace(".pdf","_shapMax05.pdf"))
 outpdf_10 = matplotlib.backends.backend_pdf.PdfPages(args.output.replace(".pdf","_shapMax10.pdf"))
 outpdf_20 = matplotlib.backends.backend_pdf.PdfPages(args.output.replace(".pdf","_shapMax20.pdf"))
 outpdf_40 = matplotlib.backends.backend_pdf.PdfPages(args.output.replace(".pdf","_shapMax40.pdf"))
+outArrFile = args.output.replace(".pdf","_arrays.pkl")
 
 
 def getParticleName(partClass):
@@ -125,7 +131,7 @@ for i in range(args.nShapBatches):
 
   images, targets = next(iter(test_dataloader))
   images = images.to(device)
-  partClass, comp, purity = targets[0].to(device), targets[1].to(device), targets[2].to(device)
+  partClass, comp, purity, run, subrun, event = targets[0].to(device), targets[1].to(device), targets[2].to(device), targets[3].to(device), targets[4].to(device), targets[5].to(device)
   shap_values = explainer.shap_values(images)
 
   for j in range(args.shapBatchSize):
@@ -135,26 +141,39 @@ for i in range(args.nShapBatches):
     image2 = images[:,4:].reshape(images.shape[0], 2, 512, 512).numpy()[j]
     truthInfo = "(true %s prong with completeness: %.2f, purity: %.2f)"%(getParticleName(partClass[j]),comp[j],purity[j])
 
+    arrays = {'run': run[j].item(), 'subrun': subrun[j].item(), 'event': event[j].item(), 'plane0_image': image0, 'plane1_image': image1, 'plane2_image': image2}
+
     for part in range(5):
       shap0 = shap_values[part][:,0:2].reshape(shap_values[part].shape[0], 2, 512, 512)[j]
       shap1 = shap_values[part][:,2:4].reshape(shap_values[part].shape[0], 2, 512, 512)[j]
       shap2 = shap_values[part][:,4:].reshape(shap_values[part].shape[0], 2, 512, 512)[j]
-      printImage(image0, shap0, "plane 0 %s shap values\n%s"%(getParticleName(part),truthInfo), -0.01, 0.01, outpdf_01)
-      printImage(image1, shap1, "plane 1 %s shap values\n%s"%(getParticleName(part),truthInfo), -0.01, 0.01, outpdf_01)
-      printImage(image2, shap2, "plane 2 %s shap values\n%s"%(getParticleName(part),truthInfo), -0.01, 0.01, outpdf_01)
-      printImage(image0, shap0, "plane 0 %s shap values\n%s"%(getParticleName(part),truthInfo), -0.05, 0.05, outpdf_05)
-      printImage(image1, shap1, "plane 1 %s shap values\n%s"%(getParticleName(part),truthInfo), -0.05, 0.05, outpdf_05)
-      printImage(image2, shap2, "plane 2 %s shap values\n%s"%(getParticleName(part),truthInfo), -0.05, 0.05, outpdf_05)
-      printImage(image0, shap0, "plane 0 %s shap values\n%s"%(getParticleName(part),truthInfo), -0.10, 0.10, outpdf_10)
-      printImage(image1, shap1, "plane 1 %s shap values\n%s"%(getParticleName(part),truthInfo), -0.10, 0.10, outpdf_10)
-      printImage(image2, shap2, "plane 2 %s shap values\n%s"%(getParticleName(part),truthInfo), -0.10, 0.10, outpdf_10)
-      printImage(image0, shap0, "plane 0 %s shap values\n%s"%(getParticleName(part),truthInfo), -0.20, 0.20, outpdf_20)
-      printImage(image1, shap1, "plane 1 %s shap values\n%s"%(getParticleName(part),truthInfo), -0.20, 0.20, outpdf_20)
-      printImage(image2, shap2, "plane 2 %s shap values\n%s"%(getParticleName(part),truthInfo), -0.20, 0.20, outpdf_20)
-      printImage(image0, shap0, "plane 0 %s shap values\n%s"%(getParticleName(part),truthInfo), -0.40, 0.40, outpdf_40)
-      printImage(image1, shap1, "plane 1 %s shap values\n%s"%(getParticleName(part),truthInfo), -0.40, 0.40, outpdf_40)
-      printImage(image2, shap2, "plane 2 %s shap values\n%s"%(getParticleName(part),truthInfo), -0.40, 0.40, outpdf_40)
+      particle = getParticleName(part)
+      arrays[f'plane0_{particle}_shap'] = shap0
+      arrays[f'plane1_{particle}_shap'] = shap1
+      arrays[f'plane2_{particle}_shap'] = shap2
+      printImage(image0, shap0, f"plane 0 {particle} shap values for event {run[j]}/{subrun[j]}/{event[j]}\n{truthInfo}", -1e-4, 1e-4, outpdf_00)
+      printImage(image1, shap1, f"plane 1 {particle} shap values for event {run[j]}/{subrun[j]}/{event[j]}\n{truthInfo}", -1e-4, 1e-4, outpdf_00)
+      printImage(image2, shap2, f"plane 2 {particle} shap values for event {run[j]}/{subrun[j]}/{event[j]}\n{truthInfo}", -1e-4, 1e-4, outpdf_00)
+      printImage(image0, shap0, f"plane 0 {particle} shap values for event {run[j]}/{subrun[j]}/{event[j]}\n{truthInfo}", -0.01, 0.01, outpdf_01)
+      printImage(image1, shap1, f"plane 1 {particle} shap values for event {run[j]}/{subrun[j]}/{event[j]}\n{truthInfo}", -0.01, 0.01, outpdf_01)
+      printImage(image2, shap2, f"plane 2 {particle} shap values for event {run[j]}/{subrun[j]}/{event[j]}\n{truthInfo}", -0.01, 0.01, outpdf_01)
+      printImage(image0, shap0, f"plane 0 {particle} shap values for event {run[j]}/{subrun[j]}/{event[j]}\n{truthInfo}", -0.05, 0.05, outpdf_05)
+      printImage(image1, shap1, f"plane 1 {particle} shap values for event {run[j]}/{subrun[j]}/{event[j]}\n{truthInfo}", -0.05, 0.05, outpdf_05)
+      printImage(image2, shap2, f"plane 2 {particle} shap values for event {run[j]}/{subrun[j]}/{event[j]}\n{truthInfo}", -0.05, 0.05, outpdf_05)
+      printImage(image0, shap0, f"plane 0 {particle} shap values for event {run[j]}/{subrun[j]}/{event[j]}\n{truthInfo}", -0.10, 0.10, outpdf_10)
+      printImage(image1, shap1, f"plane 1 {particle} shap values for event {run[j]}/{subrun[j]}/{event[j]}\n{truthInfo}", -0.10, 0.10, outpdf_10)
+      printImage(image2, shap2, f"plane 2 {particle} shap values for event {run[j]}/{subrun[j]}/{event[j]}\n{truthInfo}", -0.10, 0.10, outpdf_10)
+      printImage(image0, shap0, f"plane 0 {particle} shap values for event {run[j]}/{subrun[j]}/{event[j]}\n{truthInfo}", -0.20, 0.20, outpdf_20)
+      printImage(image1, shap1, f"plane 1 {particle} shap values for event {run[j]}/{subrun[j]}/{event[j]}\n{truthInfo}", -0.20, 0.20, outpdf_20)
+      printImage(image2, shap2, f"plane 2 {particle} shap values for event {run[j]}/{subrun[j]}/{event[j]}\n{truthInfo}", -0.20, 0.20, outpdf_20)
+      printImage(image0, shap0, f"plane 0 {particle} shap values for event {run[j]}/{subrun[j]}/{event[j]}\n{truthInfo}", -0.40, 0.40, outpdf_40)
+      printImage(image1, shap1, f"plane 1 {particle} shap values for event {run[j]}/{subrun[j]}/{event[j]}\n{truthInfo}", -0.40, 0.40, outpdf_40)
+      printImage(image2, shap2, f"plane 2 {particle} shap values for event {run[j]}/{subrun[j]}/{event[j]}\n{truthInfo}", -0.40, 0.40, outpdf_40)
 
+    with open(outArrFile, 'ab') as f:
+      pickle.dump(arrays, f)
+
+outpdf_00.close()
 outpdf_01.close()
 outpdf_05.close()
 outpdf_10.close()
