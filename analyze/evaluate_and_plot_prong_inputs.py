@@ -4,6 +4,7 @@ import sys
 import os
 
 import numpy as np
+import pickle
 
 import torch
 from torch import nn
@@ -23,6 +24,8 @@ parser.add_argument("-n", "--num_workers", type=int, default=12, help="number of
 parser.add_argument("-b", "--batch_size", type=int, default=8, help="data loader batch size")
 parser.add_argument("-o", "--outfile", type=str, default="", help="output pdf file name")
 parser.add_argument("--multiGPU", action="store_true", help="use multiple GPUs")
+parser.add_argument("--interactive", action="store_true", help="display plots one by one rather than saving to pdf")
+parser.add_argument("--writeScores", action="store_true", help="plot and write score histograms")
 args = parser.parse_args()
 
 sys.path.append(args.model_path[:args.model_path.find("/checkpoints")])
@@ -30,10 +33,11 @@ from models_instanceNorm_reco_2chan_tripleTask import ResBlock, ResNet34
 from datasets_reco_5ClassHardLabel_tripleTask import ProngDataset, mean, std
 
 mpl.rcParams['figure.dpi'] = 300
-plotfilename = args.outfile
-if plotfilename == "":
-  plotfilename = args.images_file.replace(".root","_images.pdf")
-outpdf = matplotlib.backends.backend_pdf.PdfPages(plotfilename)
+if not args.interactive:
+  plotfilename = args.outfile
+  if plotfilename == "":
+    plotfilename = args.images_file.replace(".root","_images.pdf")
+  outpdf = matplotlib.backends.backend_pdf.PdfPages(plotfilename)
 
 transform = transforms.Normalize(mean, std)
 dataset = ProngDataset(args.images_file, transformations=transform, clip=4.0)
@@ -99,10 +103,53 @@ def plotImage(X, compPred, purPred, elScore, phScore, muScore, piScore, prScore)
   plt.yticks(fontsize=ticksize)
   #plt.suptitle("Run %i Subrun %i Event %i  |  Prong: pdg %i, purity %.2f, completeness %.2f, visible energy %.2e \n e- score %.2f, photon score %.2f, mu score: %.2f, pi score %.2f, proton score %.2f, completeness prediction: %.2f, purity prediction: %.2f"%(r, sr, e, pdg, purity, completeness, visE, elScore, phScore, muScore, piScore, prScore, compPred, purPred), fontsize=suptitlesize)
   plt.suptitle("e- score %.2f, photon score %.2f, mu score: %.2f, pi score %.2f, proton score %.2f \n completeness prediction: %.2f, purity prediction: %.2f"%(elScore, phScore, muScore, piScore, prScore, compPred, purPred), fontsize=suptitlesize)
-  #plt.show()
-  outpdf.savefig(fig)
+  if args.interactive:
+    plt.show()
+    input("Press Enter to continue...")
+  else:
+    outpdf.savefig(fig)
   return
 
+def plotScores(scores):
+  #suptitlesize=6
+  titlesize=8
+  ticksize=6
+  fig = plt.figure(0, clear=True)
+  plt.subplot(2,3,1)
+  plt.hist(scores[0])
+  plt.title("electron score distribution", fontsize=titlesize)
+  plt.xticks(fontsize=ticksize)
+  plt.yticks(fontsize=ticksize)
+  plt.subplot(2,3,2)
+  plt.hist(scores[1])
+  plt.title("photon score distribution", fontsize=titlesize)
+  plt.xticks(fontsize=ticksize)
+  plt.yticks(fontsize=ticksize)
+  plt.subplot(2,3,3)
+  plt.hist(scores[2])
+  plt.title("muon score distribution", fontsize=titlesize)
+  plt.xticks(fontsize=ticksize)
+  plt.yticks(fontsize=ticksize)
+  plt.subplot(2,3,4)
+  plt.hist(scores[3])
+  plt.title("pion score distribution", fontsize=titlesize)
+  plt.xticks(fontsize=ticksize)
+  plt.yticks(fontsize=ticksize)
+  plt.subplot(2,3,5)
+  plt.hist(scores[4])
+  plt.title("proton score distribution", fontsize=titlesize)
+  plt.xticks(fontsize=ticksize)
+  plt.yticks(fontsize=ticksize)
+  if args.interactive:
+    plt.show()
+    input("Press Enter to continue...")
+  else:
+    outpdf.savefig(fig)
+  return
+
+
+if args.writeScores:
+  scores = [ [], [], [], [], [] ]
 
 for X, y in dataloader:
   X = X.to(args.device)
@@ -120,6 +167,21 @@ for X, y in dataloader:
       pred_comp = outputs[1].item()
       pred_pur = outputs[2].item()
     plotImage(X[i].cpu(), pred_comp, pred_pur, elScore, phScore, muScore, piScore, prScore)
+    if args.writeScores:
+      scores[0].append(elScore)
+      scores[1].append(phScore)
+      scores[2].append(muScore)
+      scores[3].append(piScore)
+      scores[4].append(prScore)
 
-outpdf.close()
+if args.writeScores:
+  scores = np.array(scores)
+  with open(args.images_file.replace(".root","_scoreArray.pkl"), 'wb') as f:
+    pickle.dump(scores, f)
+
+if not args.interactive:
+  if args.writeScores:
+    plotScores(scores)
+  outpdf.close()
+
 

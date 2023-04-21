@@ -10,6 +10,8 @@ from torch import nn
 from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 
+import ROOT as rt
+
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__)))+'/models')
 
 
@@ -20,6 +22,7 @@ parser.add_argument("-d", "--device", type=str, default="cuda", help="gpu/cpu de
 parser.add_argument("-n", "--num_workers", type=int, default=12, help="number of cpu workers for data loading")
 parser.add_argument("-b", "--batch_size", type=int, default=1, help="validation batch size")
 parser.add_argument("-c", "--l0inChans", type=int, default=2, help="number of input channels for first conv layer")
+parser.add_argument("-o", "--outfile", type=str, default="evaluate_reco_model_output_plots.root", help="name of output root file with completeness and purity histograms")
 parser.add_argument("--multiTask", action="store_true", help="do particle classification and completeness regression")
 parser.add_argument("--tripleTask", action="store_true", help="do particle classification and completeness and purity regression")
 parser.add_argument("--classifyComp", action="store_true", help="do classification instead of regression for completeness")
@@ -29,12 +32,16 @@ parser.add_argument("--noMask", action="store_true", help="only use prong pixels
 parser.add_argument("--plane2only", action="store_true", help="only use collection plane images")
 parser.add_argument("--resnet18", action="store_true", help="use ResNet18 instead of ResNet34")
 parser.add_argument("--singleGPU", action="store_true", help="only use one GPU")
+parser.add_argument("--noLowPurBins", action="store_true", help="input file has no true purity < 0.6 events")
 args = parser.parse_args()
+
+rt.TH1.SetDefaultSumw2(rt.kTRUE)
+rt.gStyle.SetOptStat(0)
 
 if args.multiTask and (args.l0inChans != 2 or args.use6class or args.softLabels or args.noMask or args.plane2only or args.resnet18):
   sys.exit("multiTask training only configured for 5 class hard labels with mask (3 plane, 2 in channel config.) with ResNet34")
 
-if args.tripleTask and (args.l0inChans != 2 or args.use6class or args.softLabels or args.noMask or args.plane2only or args.resnet18 or args.hardWeights or args.multiTask):
+if args.tripleTask and (args.l0inChans != 2 or args.use6class or args.softLabels or args.noMask or args.plane2only or args.resnet18 or args.multiTask):
   sys.exit("tripleTask training only configured for 5 class hard labels with mask (3 plane, 2 in channel config.) with ResNet34 and learnable loss weights")
 
 if args.tripleTask:
@@ -151,6 +158,146 @@ class fiveClassCounter:
         self.n_match[match] += 1
 
 
+if args.multiTask or args.tripleTask:
+
+  h_comp_predBin0 = rt.TH1F("h_comp_predBin0","True Completeness Distributions, Validation Sample",51,0,1.02)
+  h_comp_predBin0.SetLineWidth(2)
+  h_comp_predBin0.SetLineColor(rt.kBlack)
+  h_comp_predBin0.GetXaxis().SetTitle("true completeness")
+  h_comp_predBin1 = rt.TH1F("h_comp_predBin1","True Completeness Distributions, Validation Sample",51,0,1.02)
+  h_comp_predBin1.SetLineWidth(2)
+  h_comp_predBin1.SetLineColor(40)
+  h_comp_predBin1.GetXaxis().SetTitle("true completeness")
+  h_comp_predBin2 = rt.TH1F("h_comp_predBin2","True Completeness Distributions, Validation Sample",51,0,1.02)
+  h_comp_predBin2.SetLineWidth(2)
+  h_comp_predBin2.SetLineColor(8)
+  h_comp_predBin2.GetXaxis().SetTitle("true completeness")
+  h_comp_predBin3 = rt.TH1F("h_comp_predBin3","True Completeness Distributions, Validation Sample",51,0,1.02)
+  h_comp_predBin3.SetLineWidth(2)
+  h_comp_predBin3.SetLineColor(rt.kBlue)
+  h_comp_predBin3.GetXaxis().SetTitle("true completeness")
+  h_comp_predBin4 = rt.TH1F("h_comp_predBin4","True Completeness Distributions, Validation Sample",51,0,1.02)
+  h_comp_predBin4.SetLineWidth(2)
+  h_comp_predBin4.SetLineColor(rt.kRed)
+  h_comp_predBin4.GetXaxis().SetTitle("true completeness")
+  
+  h_comp_trueBin0 = rt.TH1F("h_comp_trueBin0","Predicted Completeness Distributions, Validation Sample",51,0,1.02)
+  h_comp_trueBin0.SetLineWidth(2)
+  h_comp_trueBin0.SetLineColor(rt.kBlack)
+  h_comp_trueBin0.GetXaxis().SetTitle("predicted completeness")
+  h_comp_trueBin1 = rt.TH1F("h_comp_trueBin1","Predicted Completeness Distributions, Validation Sample",51,0,1.02)
+  h_comp_trueBin1.SetLineWidth(2)
+  h_comp_trueBin1.SetLineColor(40)
+  h_comp_trueBin1.GetXaxis().SetTitle("predicted completeness")
+  h_comp_trueBin2 = rt.TH1F("h_comp_trueBin2","Predicted Completeness Distributions, Validation Sample",51,0,1.02)
+  h_comp_trueBin2.SetLineWidth(2)
+  h_comp_trueBin2.SetLineColor(8)
+  h_comp_trueBin2.GetXaxis().SetTitle("predicted completeness")
+  h_comp_trueBin3 = rt.TH1F("h_comp_trueBin3","Predicted Completeness Distributions, Validation Sample",51,0,1.02)
+  h_comp_trueBin3.SetLineWidth(2)
+  h_comp_trueBin3.SetLineColor(rt.kBlue)
+  h_comp_trueBin3.GetXaxis().SetTitle("predicted completeness")
+  h_comp_trueBin4 = rt.TH1F("h_comp_trueBin4","Predicted Completeness Distributions, Validation Sample",51,0,1.02)
+  h_comp_trueBin4.SetLineWidth(2)
+  h_comp_trueBin4.SetLineColor(rt.kRed)
+  h_comp_trueBin4.GetXaxis().SetTitle("predicted completeness")
+  
+  if args.tripleTask:
+
+    h_pur_predBin0 = rt.TH1F("h_pur_predBin0","True Purity Distributions, Validation Sample",51,0,1.02)
+    h_pur_predBin0.SetLineWidth(2)
+    h_pur_predBin0.SetLineColor(rt.kBlack)
+    h_pur_predBin0.GetXaxis().SetTitle("true purity")
+    h_pur_predBin1 = rt.TH1F("h_pur_predBin1","True Purity Distributions, Validation Sample",51,0,1.02)
+    h_pur_predBin1.SetLineWidth(2)
+    h_pur_predBin1.SetLineColor(40)
+    h_pur_predBin1.GetXaxis().SetTitle("true purity")
+    h_pur_predBin2 = rt.TH1F("h_pur_predBin2","True Purity Distributions, Validation Sample",51,0,1.02)
+    h_pur_predBin2.SetLineWidth(2)
+    h_pur_predBin2.SetLineColor(8)
+    h_pur_predBin2.GetXaxis().SetTitle("true purity")
+    h_pur_predBin3 = rt.TH1F("h_pur_predBin3","True Purity Distributions, Validation Sample",51,0,1.02)
+    h_pur_predBin3.SetLineWidth(2)
+    h_pur_predBin3.SetLineColor(rt.kBlue)
+    h_pur_predBin3.GetXaxis().SetTitle("true purity")
+    h_pur_predBin4 = rt.TH1F("h_pur_predBin4","True Purity Distributions, Validation Sample",51,0,1.02)
+    h_pur_predBin4.SetLineWidth(2)
+    h_pur_predBin4.SetLineColor(rt.kRed)
+    h_pur_predBin4.GetXaxis().SetTitle("true purity")
+    
+    h_pur_trueBin0 = rt.TH1F("h_pur_trueBin0","Predicted Purity Distributions, Validation Sample",51,0,1.02)
+    h_pur_trueBin0.SetLineWidth(2)
+    h_pur_trueBin0.SetLineColor(rt.kBlack)
+    h_pur_trueBin0.GetXaxis().SetTitle("predicted purity")
+    h_pur_trueBin1 = rt.TH1F("h_pur_trueBin1","Predicted Purity Distributions, Validation Sample",51,0,1.02)
+    h_pur_trueBin1.SetLineWidth(2)
+    h_pur_trueBin1.SetLineColor(40)
+    h_pur_trueBin1.GetXaxis().SetTitle("predicted purity")
+    h_pur_trueBin2 = rt.TH1F("h_pur_trueBin2","Predicted Purity Distributions, Validation Sample",51,0,1.02)
+    h_pur_trueBin2.SetLineWidth(2)
+    h_pur_trueBin2.SetLineColor(8)
+    h_pur_trueBin2.GetXaxis().SetTitle("predicted purity")
+    h_pur_trueBin3 = rt.TH1F("h_pur_trueBin3","Predicted Purity Distributions, Validation Sample",51,0,1.02)
+    h_pur_trueBin3.SetLineWidth(2)
+    h_pur_trueBin3.SetLineColor(rt.kBlue)
+    h_pur_trueBin3.GetXaxis().SetTitle("predicted purity")
+    h_pur_trueBin4 = rt.TH1F("h_pur_trueBin4","Predicted Purity Distributions, Validation Sample",51,0,1.02)
+    h_pur_trueBin4.SetLineWidth(2)
+    h_pur_trueBin4.SetLineColor(rt.kRed)
+    h_pur_trueBin4.GetXaxis().SetTitle("predicted purity")
+
+
+def fillCompHistos(trueVal, predVal, trueBin, predBin):
+
+  if predVal < 0.2:
+    h_comp_predBin0.Fill(trueVal)
+  elif predVal < 0.4:
+    h_comp_predBin1.Fill(trueVal)
+  elif predVal < 0.6:
+    h_comp_predBin2.Fill(trueVal)
+  elif predVal < 0.8:
+    h_comp_predBin3.Fill(trueVal)
+  else:
+    h_comp_predBin4.Fill(trueVal)
+
+  if trueVal < 0.2:
+    h_comp_trueBin0.Fill(predVal)
+  elif trueVal < 0.4:
+    h_comp_trueBin1.Fill(predVal)
+  elif trueVal < 0.6:
+    h_comp_trueBin2.Fill(predVal)
+  elif trueVal < 0.8:
+    h_comp_trueBin3.Fill(predVal)
+  else:
+    h_comp_trueBin4.Fill(predVal)
+
+
+def fillPurityHistos(trueVal, predVal, trueBin, predBin):
+
+  if predVal < 0.2:
+    h_pur_predBin0.Fill(trueVal)
+  elif predVal < 0.4:
+    h_pur_predBin1.Fill(trueVal)
+  elif predVal < 0.6:
+    h_pur_predBin2.Fill(trueVal)
+  elif predVal < 0.8:
+    h_pur_predBin3.Fill(trueVal)
+  else:
+    h_pur_predBin4.Fill(trueVal)
+
+  if trueVal < 0.2:
+    h_pur_trueBin0.Fill(predVal)
+  elif trueVal < 0.4:
+    h_pur_trueBin1.Fill(predVal)
+  elif trueVal < 0.6:
+    h_pur_trueBin2.Fill(predVal)
+  elif trueVal < 0.8:
+    h_pur_trueBin3.Fill(predVal)
+  else:
+    h_pur_trueBin4.Fill(predVal)
+
+
+
 def test(dataloader, model):
     
     model.eval()
@@ -198,16 +345,18 @@ def test(dataloader, model):
                 pred_comp = outputs[1]
                 if args.tripleTask:
                   pred_pur = outputs[2]
-                  yPur = torch.LongTensor([getCompClass(y[2][i].item()) for i in range(y[1].size(0))])
-                  yPur_pred = torch.LongTensor([getCompClass(pred_pur[i].item()) for i in range(pred_pur.size(0))])
+                  yPur = y[2]
+                  yPurCl = torch.LongTensor([getCompClass(y[2][i].item()) for i in range(y[2].size(0))])
+                  yPurCl_pred = torch.LongTensor([getCompClass(pred_pur[i].item()) for i in range(pred_pur.size(0))])
                 if args.classifyComp:
-                  yComp = y[1].type(torch.LongTensor)
-                  yComp_pred = pred_comp.argmax(1)
+                  yCompCl = y[1].type(torch.LongTensor)
+                  yCompCl_pred = pred_comp.argmax(1)
                 else:
-                  yComp = torch.LongTensor([getCompClass(y[1][i].item()) for i in range(y[1].size(0))])
-                  yComp_pred = torch.LongTensor([getCompClass(pred_comp[i].item()) for i in range(pred_comp.size(0))])
+                  yComp = y[1]
+                  yCompCl = torch.LongTensor([getCompClass(y[1][i].item()) for i in range(y[1].size(0))])
+                  yCompCl_pred = torch.LongTensor([getCompClass(pred_comp[i].item()) for i in range(pred_comp.size(0))])
                 y = y[0].type(torch.LongTensor)
-                y, yComp, yComp_pred = y.to(args.device), yComp.to(args.device), yComp_pred.to(args.device)
+                y, yCompCl, yCompCl_pred = y.to(args.device), yCompCl.to(args.device), yCompCl_pred.to(args.device)
             elif args.softLabels:
                 y = y.argmax(1)
                 X, y = X.to(args.device), y.to(args.device)
@@ -219,17 +368,19 @@ def test(dataloader, model):
             y_pred = pred.argmax(1)
             
             for i in range(y.size(0)):
-              effCounts[y[i].item()].update(y_pred[i].item())
-              purCounts[y_pred[i].item()].update(y[i].item())
+                effCounts[y[i].item()].update(y_pred[i].item())
+                purCounts[y_pred[i].item()].update(y[i].item())
 
             if args.multiTask or args.tripleTask:
-              for i in range(yComp.size(0)):
-                effCountsComp[yComp[i].item()].update(yComp_pred[i].item())
-                purCountsComp[yComp_pred[i].item()].update(yComp[i].item())
-              if args.tripleTask:
-                for i in range(yPur.size(0)):
-                  effCountsPur[yPur[i].item()].update(yPur_pred[i].item())
-                  purCountsPur[yPur_pred[i].item()].update(yPur[i].item())
+                for i in range(yCompCl.size(0)):
+                  effCountsComp[yCompCl[i].item()].update(yCompCl_pred[i].item())
+                  purCountsComp[yCompCl_pred[i].item()].update(yCompCl[i].item())
+                  fillCompHistos(yComp[i].item(), pred_comp[i].item(), yCompCl[i].item(), yCompCl_pred[i].item())
+                if args.tripleTask:
+                    for i in range(yPurCl.size(0)):
+                      effCountsPur[yPurCl[i].item()].update(yPurCl_pred[i].item())
+                      purCountsPur[yPurCl_pred[i].item()].update(yPurCl[i].item())
+                      fillPurityHistos(yPur[i].item(), pred_pur[i].item(), yPurCl[i].item(), yPurCl_pred[i].item())
             
             iEl = (y == 0).nonzero(as_tuple=True)
             iPh = (y == 1).nonzero(as_tuple=True)
@@ -277,7 +428,7 @@ def test(dataloader, model):
 
 
 
-teA, teA_e, teA_ph, teA_mu, teA_pi, teA_pr, teA_o, effCounts, purCounts, effCountsComp, purCountsComp = test(dataloader, model)
+teA, teA_e, teA_ph, teA_mu, teA_pi, teA_pr, teA_o, effCounts, purCounts, effCountsComp, purCountsComp, effCountsPur, purCountsPur = test(dataloader, model)
 print("test accuracy:", teA, " electron test accuracy:", teA_e, " photon test accuracy:", teA_ph, " muon test accuracy:", teA_mu, " pion test accuracy:", teA_pi, " proton test accuracy:", teA_pr, " other test accuracy:", teA_o, flush=True)
 
 print("PARTICLE CLASSIFICATION RESULTS:")
@@ -335,4 +486,204 @@ for i in range(5):
         print("    %i: %f"%(j, ratio))
 
 
+
+outFile = rt.TFile(args.outfile, "RECREATE")
+
+cnv_comp_predBins = rt.TCanvas("cnv_comp_predBins")
+h_comp_predBin4.Draw("EHIST")
+h_comp_predBin3.Draw("EHISTSAME")
+h_comp_predBin2.Draw("EHISTSAME")
+h_comp_predBin1.Draw("EHISTSAME")
+h_comp_predBin0.Draw("EHISTSAME")
+leg_comp_predBins = rt.TLegend(0.7,0.7,0.9,0.9)
+leg_comp_predBins.AddEntry(h_comp_predBin0, "0.0 < predicted completeness < 0.2", "l")
+leg_comp_predBins.AddEntry(h_comp_predBin1, "0.2 < predicted completeness < 0.4", "l")
+leg_comp_predBins.AddEntry(h_comp_predBin2, "0.4 < predicted completeness < 0.6", "l")
+leg_comp_predBins.AddEntry(h_comp_predBin3, "0.6 < predicted completeness < 0.8", "l")
+leg_comp_predBins.AddEntry(h_comp_predBin4, "0.8 < predicted completeness < 1.0", "l")
+leg_comp_predBins.Draw()
+cnv_comp_predBins.Write()
+
+cnv_comp_trueBins = rt.TCanvas("cnv_comp_trueBins")
+h_comp_trueBin4.Draw("EHIST")
+h_comp_trueBin3.Draw("EHISTSAME")
+h_comp_trueBin2.Draw("EHISTSAME")
+h_comp_trueBin1.Draw("EHISTSAME")
+h_comp_trueBin0.Draw("EHISTSAME")
+leg_comp_trueBins = rt.TLegend(0.7,0.7,0.9,0.9)
+leg_comp_trueBins.AddEntry(h_comp_trueBin0, "0.0 < true completeness < 0.2", "l")
+leg_comp_trueBins.AddEntry(h_comp_trueBin1, "0.2 < true completeness < 0.4", "l")
+leg_comp_trueBins.AddEntry(h_comp_trueBin2, "0.4 < true completeness < 0.6", "l")
+leg_comp_trueBins.AddEntry(h_comp_trueBin3, "0.6 < true completeness < 0.8", "l")
+leg_comp_trueBins.AddEntry(h_comp_trueBin4, "0.8 < true completeness < 1.0", "l")
+leg_comp_trueBins.Draw()
+cnv_comp_trueBins.Write()
+
+cnv_pur_predBins = rt.TCanvas("cnv_pur_predBins")
+h_pur_predBin4.Draw("EHIST")
+h_pur_predBin3.Draw("EHISTSAME")
+h_pur_predBin2.Draw("EHISTSAME")
+if not args.noLowPurBins:
+  h_pur_predBin1.Draw("EHISTSAME")
+  #h_pur_predBin0.Draw("EHISTSAME")
+leg_pur_predBins = rt.TLegend(0.7,0.7,0.9,0.9)
+if not args.noLowPurBins:
+  #leg_pur_predBins.AddEntry(h_pur_predBin0, "0.0 < predicted purity < 0.2", "l")
+  leg_pur_predBins.AddEntry(h_pur_predBin1, "0.2 < predicted purity < 0.4", "l")
+leg_pur_predBins.AddEntry(h_pur_predBin2, "0.4 < predicted purity < 0.6", "l")
+leg_pur_predBins.AddEntry(h_pur_predBin3, "0.6 < predicted purity < 0.8", "l")
+leg_pur_predBins.AddEntry(h_pur_predBin4, "0.8 < predicted purity < 1.0", "l")
+leg_pur_predBins.Draw()
+cnv_pur_predBins.Write()
+
+cnv_pur_trueBins = rt.TCanvas("cnv_pur_trueBins")
+h_pur_trueBin4.Draw("EHIST")
+h_pur_trueBin3.Draw("EHISTSAME")
+if not args.noLowPurBins:
+  h_pur_trueBin2.Draw("EHISTSAME")
+  h_pur_trueBin1.Draw("EHISTSAME")
+  #h_pur_trueBin0.Draw("EHISTSAME")
+leg_pur_trueBins = rt.TLegend(0.7,0.7,0.9,0.9)
+if not args.noLowPurBins:
+  #leg_pur_trueBins.AddEntry(h_pur_trueBin0, "0.0 < true purity < 0.2", "l")
+  leg_pur_trueBins.AddEntry(h_pur_trueBin1, "0.2 < true purity < 0.4", "l")
+  leg_pur_trueBins.AddEntry(h_pur_trueBin2, "0.4 < true purity < 0.6", "l")
+leg_pur_trueBins.AddEntry(h_pur_trueBin3, "0.6 < true purity < 0.8", "l")
+leg_pur_trueBins.AddEntry(h_pur_trueBin4, "0.8 < true purity < 1.0", "l")
+leg_pur_trueBins.Draw()
+cnv_pur_trueBins.Write()
+
+
+h_comp_predBin0_norm = h_comp_predBin0.Clone("h_comp_predBin0_norm")
+h_comp_predBin1_norm = h_comp_predBin1.Clone("h_comp_predBin1_norm")
+h_comp_predBin2_norm = h_comp_predBin2.Clone("h_comp_predBin2_norm")
+h_comp_predBin3_norm = h_comp_predBin3.Clone("h_comp_predBin3_norm")
+h_comp_predBin4_norm = h_comp_predBin4.Clone("h_comp_predBin4_norm")
+h_comp_trueBin0_norm = h_comp_trueBin0.Clone("h_comp_trueBin0_norm")
+h_comp_trueBin1_norm = h_comp_trueBin1.Clone("h_comp_trueBin1_norm")
+h_comp_trueBin2_norm = h_comp_trueBin2.Clone("h_comp_trueBin2_norm")
+h_comp_trueBin3_norm = h_comp_trueBin3.Clone("h_comp_trueBin3_norm")
+h_comp_trueBin4_norm = h_comp_trueBin4.Clone("h_comp_trueBin4_norm")
+if not args.noLowPurBins:
+  h_pur_predBin0_norm = h_pur_predBin0.Clone("h_pur_predBin0_norm")
+  h_pur_predBin1_norm = h_pur_predBin1.Clone("h_pur_predBin1_norm")
+h_pur_predBin2_norm = h_pur_predBin2.Clone("h_pur_predBin2_norm")
+h_pur_predBin3_norm = h_pur_predBin3.Clone("h_pur_predBin3_norm")
+h_pur_predBin4_norm = h_pur_predBin4.Clone("h_pur_predBin4_norm")
+if not args.noLowPurBins:
+  h_pur_trueBin0_norm = h_pur_trueBin0.Clone("h_pur_trueBin0_norm")
+  h_pur_trueBin1_norm = h_pur_trueBin1.Clone("h_pur_trueBin1_norm")
+  h_pur_trueBin2_norm = h_pur_trueBin2.Clone("h_pur_trueBin2_norm")
+h_pur_trueBin3_norm = h_pur_trueBin3.Clone("h_pur_trueBin3_norm")
+h_pur_trueBin4_norm = h_pur_trueBin4.Clone("h_pur_trueBin4_norm")
+
+h_comp_predBin0_norm.GetYaxis().SetTitle("area normalized event count")
+h_comp_predBin1_norm.GetYaxis().SetTitle("area normalized event count")
+h_comp_predBin2_norm.GetYaxis().SetTitle("area normalized event count")
+h_comp_predBin3_norm.GetYaxis().SetTitle("area normalized event count")
+h_comp_predBin4_norm.GetYaxis().SetTitle("area normalized event count")
+h_comp_trueBin0_norm.GetYaxis().SetTitle("area normalized event count")
+h_comp_trueBin1_norm.GetYaxis().SetTitle("area normalized event count")
+h_comp_trueBin2_norm.GetYaxis().SetTitle("area normalized event count")
+h_comp_trueBin3_norm.GetYaxis().SetTitle("area normalized event count")
+h_comp_trueBin4_norm.GetYaxis().SetTitle("area normalized event count")
+if not args.noLowPurBins:
+  h_pur_predBin0_norm.GetYaxis().SetTitle("area normalized event count")
+  h_pur_predBin1_norm.GetYaxis().SetTitle("area normalized event count")
+h_pur_predBin2_norm.GetYaxis().SetTitle("area normalized event count")
+h_pur_predBin3_norm.GetYaxis().SetTitle("area normalized event count")
+h_pur_predBin4_norm.GetYaxis().SetTitle("area normalized event count")
+if not args.noLowPurBins:
+  h_pur_trueBin0_norm.GetYaxis().SetTitle("area normalized event count")
+  h_pur_trueBin1_norm.GetYaxis().SetTitle("area normalized event count")
+  h_pur_trueBin2_norm.GetYaxis().SetTitle("area normalized event count")
+h_pur_trueBin3_norm.GetYaxis().SetTitle("area normalized event count")
+h_pur_trueBin4_norm.GetYaxis().SetTitle("area normalized event count")
+
+h_comp_predBin0_norm.Scale(1.0/h_comp_predBin0_norm.Integral())
+h_comp_predBin1_norm.Scale(1.0/h_comp_predBin1_norm.Integral())
+h_comp_predBin2_norm.Scale(1.0/h_comp_predBin2_norm.Integral())
+h_comp_predBin3_norm.Scale(1.0/h_comp_predBin3_norm.Integral())
+h_comp_predBin4_norm.Scale(1.0/h_comp_predBin4_norm.Integral())
+h_comp_trueBin0_norm.Scale(1.0/h_comp_trueBin0_norm.Integral())
+h_comp_trueBin1_norm.Scale(1.0/h_comp_trueBin1_norm.Integral())
+h_comp_trueBin2_norm.Scale(1.0/h_comp_trueBin2_norm.Integral())
+h_comp_trueBin3_norm.Scale(1.0/h_comp_trueBin3_norm.Integral())
+h_comp_trueBin4_norm.Scale(1.0/h_comp_trueBin4_norm.Integral())
+if not args.noLowPurBins:
+  h_pur_predBin0_norm.Scale(1.0/h_pur_predBin0_norm.Integral())
+  h_pur_predBin1_norm.Scale(1.0/h_pur_predBin1_norm.Integral())
+h_pur_predBin2_norm.Scale(1.0/h_pur_predBin2_norm.Integral())
+h_pur_predBin3_norm.Scale(1.0/h_pur_predBin3_norm.Integral())
+h_pur_predBin4_norm.Scale(1.0/h_pur_predBin4_norm.Integral())
+if not args.noLowPurBins:
+  h_pur_trueBin0_norm.Scale(1.0/h_pur_trueBin0_norm.Integral())
+  h_pur_trueBin1_norm.Scale(1.0/h_pur_trueBin1_norm.Integral())
+  h_pur_trueBin2_norm.Scale(1.0/h_pur_trueBin2_norm.Integral())
+h_pur_trueBin3_norm.Scale(1.0/h_pur_trueBin3_norm.Integral())
+h_pur_trueBin4_norm.Scale(1.0/h_pur_trueBin4_norm.Integral())
+
+cnv_comp_predBins_norm = rt.TCanvas("cnv_comp_predBins_norm")
+h_comp_predBin4_norm.Draw("EHIST")
+h_comp_predBin3_norm.Draw("EHISTSAME")
+h_comp_predBin2_norm.Draw("EHISTSAME")
+h_comp_predBin1_norm.Draw("EHISTSAME")
+h_comp_predBin0_norm.Draw("EHISTSAME")
+leg_comp_predBins_norm = rt.TLegend(0.7,0.7,0.9,0.9)
+leg_comp_predBins_norm.AddEntry(h_comp_predBin0_norm, "0.0 < predicted completeness < 0.2", "l")
+leg_comp_predBins_norm.AddEntry(h_comp_predBin1_norm, "0.2 < predicted completeness < 0.4", "l")
+leg_comp_predBins_norm.AddEntry(h_comp_predBin2_norm, "0.4 < predicted completeness < 0.6", "l")
+leg_comp_predBins_norm.AddEntry(h_comp_predBin3_norm, "0.6 < predicted completeness < 0.8", "l")
+leg_comp_predBins_norm.AddEntry(h_comp_predBin4_norm, "0.8 < predicted completeness < 1.0", "l")
+leg_comp_predBins_norm.Draw()
+cnv_comp_predBins_norm.Write()
+
+cnv_comp_trueBins_norm = rt.TCanvas("cnv_comp_trueBins_norm")
+h_comp_trueBin4_norm.Draw("EHIST")
+h_comp_trueBin3_norm.Draw("EHISTSAME")
+h_comp_trueBin2_norm.Draw("EHISTSAME")
+h_comp_trueBin1_norm.Draw("EHISTSAME")
+h_comp_trueBin0_norm.Draw("EHISTSAME")
+leg_comp_trueBins_norm = rt.TLegend(0.7,0.7,0.9,0.9)
+leg_comp_trueBins_norm.AddEntry(h_comp_trueBin0_norm, "0.0 < true completeness < 0.2", "l")
+leg_comp_trueBins_norm.AddEntry(h_comp_trueBin1_norm, "0.2 < true completeness < 0.4", "l")
+leg_comp_trueBins_norm.AddEntry(h_comp_trueBin2_norm, "0.4 < true completeness < 0.6", "l")
+leg_comp_trueBins_norm.AddEntry(h_comp_trueBin3_norm, "0.6 < true completeness < 0.8", "l")
+leg_comp_trueBins_norm.AddEntry(h_comp_trueBin4_norm, "0.8 < true completeness < 1.0", "l")
+leg_comp_trueBins_norm.Draw()
+cnv_comp_trueBins_norm.Write()
+
+cnv_pur_predBins_norm = rt.TCanvas("cnv_pur_predBins_norm")
+h_pur_predBin4_norm.Draw("EHIST")
+h_pur_predBin3_norm.Draw("EHISTSAME")
+h_pur_predBin2_norm.Draw("EHISTSAME")
+if not args.noLowPurBins:
+  h_pur_predBin1_norm.Draw("EHISTSAME")
+  #h_pur_predBin0_norm.Draw("EHISTSAME")
+leg_pur_predBins_norm = rt.TLegend(0.7,0.7,0.9,0.9)
+if not args.noLowPurBins:
+  #leg_pur_predBins_norm.AddEntry(h_pur_predBin0_norm, "0.0 < predicted purity < 0.2", "l")
+  leg_pur_predBins_norm.AddEntry(h_pur_predBin1_norm, "0.2 < predicted purity < 0.4", "l")
+leg_pur_predBins_norm.AddEntry(h_pur_predBin2_norm, "0.4 < predicted purity < 0.6", "l")
+leg_pur_predBins_norm.AddEntry(h_pur_predBin3_norm, "0.6 < predicted purity < 0.8", "l")
+leg_pur_predBins_norm.AddEntry(h_pur_predBin4_norm, "0.8 < predicted purity < 1.0", "l")
+leg_pur_predBins_norm.Draw()
+cnv_pur_predBins_norm.Write()
+
+cnv_pur_trueBins_norm = rt.TCanvas("cnv_pur_trueBins_norm")
+h_pur_trueBin4_norm.Draw("EHIST")
+h_pur_trueBin3_norm.Draw("EHISTSAME")
+if not args.noLowPurBins:
+  h_pur_trueBin2_norm.Draw("EHISTSAME")
+  h_pur_trueBin1_norm.Draw("EHISTSAME")
+  #h_pur_trueBin0_norm.Draw("EHISTSAME")
+leg_pur_trueBins_norm = rt.TLegend(0.7,0.7,0.9,0.9)
+if not args.noLowPurBins:
+  #leg_pur_trueBins_norm.AddEntry(h_pur_trueBin0_norm, "0.0 < true purity < 0.2", "l")
+  leg_pur_trueBins_norm.AddEntry(h_pur_trueBin1_norm, "0.2 < true purity < 0.4", "l")
+  leg_pur_trueBins_norm.AddEntry(h_pur_trueBin2_norm, "0.4 < true purity < 0.6", "l")
+leg_pur_trueBins_norm.AddEntry(h_pur_trueBin3_norm, "0.6 < true purity < 0.8", "l")
+leg_pur_trueBins_norm.AddEntry(h_pur_trueBin4_norm, "0.8 < true purity < 1.0", "l")
+leg_pur_trueBins_norm.Draw()
+cnv_pur_trueBins_norm.Write()
 
