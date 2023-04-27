@@ -201,6 +201,10 @@ if args.multiTask or args.tripleTask:
   h_comp_trueBin4.SetLineWidth(2)
   h_comp_trueBin4.SetLineColor(rt.kRed)
   h_comp_trueBin4.GetXaxis().SetTitle("predicted completeness")
+
+  h_comp_heatmap = rt.TH2F("h_comp_heatmap","Predicted vs. True Completeness, Validation Sample",26,0,1.04,26,0,1.04)
+  h_comp_heatmap.GetXaxis().SetTitle("true completeness")
+  h_comp_heatmap.GetYaxis().SetTitle("predicted completeness")
   
   if args.tripleTask:
 
@@ -246,8 +250,14 @@ if args.multiTask or args.tripleTask:
     h_pur_trueBin4.SetLineColor(rt.kRed)
     h_pur_trueBin4.GetXaxis().SetTitle("predicted purity")
 
+    h_pur_heatmap = rt.TH2F("h_pur_heatmap","Predicted vs. True Purity, Validation Sample",26,0,1.04,26,0,1.04)
+    h_pur_heatmap.GetXaxis().SetTitle("true purity")
+    h_pur_heatmap.GetYaxis().SetTitle("predicted purity")
+
 
 def fillCompHistos(trueVal, predVal, trueBin, predBin):
+
+  h_comp_heatmap.Fill(trueVal, predVal)
 
   if predVal < 0.2:
     h_comp_predBin0.Fill(trueVal)
@@ -273,6 +283,8 @@ def fillCompHistos(trueVal, predVal, trueBin, predBin):
 
 
 def fillPurityHistos(trueVal, predVal, trueBin, predBin):
+
+  h_pur_heatmap.Fill(trueVal, predVal)
 
   if predVal < 0.2:
     h_pur_predBin0.Fill(trueVal)
@@ -488,6 +500,14 @@ for i in range(5):
 
 
 outFile = rt.TFile(args.outfile, "RECREATE")
+
+cnv_comp_heatmap = rt.TCanvas("cnv_comp_heatmap")
+h_comp_heatmap.Draw("COLZ")
+cnv_comp_heatmap.Write()
+
+cnv_pur_heatmap = rt.TCanvas("cnv_pur_heatmap")
+h_pur_heatmap.Draw("COLZ")
+cnv_pur_heatmap.Write()
 
 cnv_comp_predBins = rt.TCanvas("cnv_comp_predBins")
 h_comp_predBin4.Draw("EHIST")
