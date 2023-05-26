@@ -3,15 +3,15 @@
 Files for training and evaluating a MicroBooNE prong CNN for the gen2 deep learning reconstruction framework
 
 The latest iteration of this network performs particle classification, completeness regression, and purity regression for an input reconstructed prong.  
-completeness = the fraction of the true particle that is reconstructed in the input prong  
-purity = the fraction of the reconstructed prong that is actually from the true particle  
-In training/evaluation, "the true particle" = the simulated particle that deposited the most energy in the pixels belonging to the input prong (according to MC truth)
+* completeness = the fraction of the true particle that is reconstructed in the input prong  
+* purity = the fraction of the reconstructed prong that is actually from the true particle  
+* In training/evaluation, "the true particle" = the simulated particle that deposited the most energy in the pixels belonging to the input prong (according to MC truth)
 
 This repository has a variety of training scripts/options, dataset classes, and model classes that setup different network configurations that I've tested.
 
 To get the current best-performing configurations, use:  
-The ProngDataset class (inherits from torch.utils.data.Dataset) from models/datasets_reco_5ClassHardLabel_tripleTask.py  
-The ResNet34 class (inherits from torch.nn.Module) from models/models_instanceNorm_reco_2chan_tripleTask.py
+* The ProngDataset class (inherits from torch.utils.data.Dataset) from models/datasets_reco_5ClassHardLabel_tripleTask.py  
+* The ResNet34 class (inherits from torch.nn.Module) from models/models_instanceNorm_reco_2chan_tripleTask.py
 
 ## Preprocessing
 
@@ -19,17 +19,32 @@ When training/evaluating the network, I use the following two scripts for prepro
 preprocess/prepare_reco_images_cluster.py  
 preprocess/split_image_file_by_val_num.py
 
+### main preprocessing script
+
 The first script (prepare_reco_images_cluster.py) is designed to be run on a cluster with slurm.  
+
 You'll need to have the [ubdl repository](https://github.com/LArbys/ubdl) compiled and loaded in your environment  
+
 It takes two inputs: a text file containing a list of DLgen2 kpsrecomanagerana larflow reco files, and a text file containing a matching list of merged_dlreco files.  
+
 This script will need to be heavily modified to run in other reconstruction frameworks.  
+
 The important thing is that the "ImageTree" root tree in the script's output file is structured the same way.  
+
 Each entry in the ImageTree is for one prong (one input to the network).  
+
 These are the ImageTree branches that are needed to actually train and run the network:  
-"pdg", "completeness", "purity", the input prong pixels (all branches beginning with "plane"), and the full-event/context pixels from the prong's cropped window (all branches beginning with "raw_plane")  
+* "pdg"
+* "completeness"
+* "purity"
+* the input prong pixels (all branches beginning with "plane")
+* the full-event/context pixels from the prong's cropped window (all branches beginning with "raw_plane")  
+
 All of the other branches are for book keeping (e.g. run, subrun, event, and vertex/cluster ID numbers) or for studying the output prong sample.
 
+### splitting output into training/validation samples
 The second script (split_image_file_by_val_num.py) splits the output of prepare_reco_images_cluster.py into training and evaluation samples.  
+
 It will put "args.nVal" prongs from each class into the evaluation sample and all remaining prongs in the training sample.
 
 After preprocessing, there will be two root files: one containing all of the prong images and labels for prongs in the training sample, and one for the validation sample.
@@ -40,10 +55,11 @@ To train the network with the latest and greatest configuration, use:
 train/train_wandb_reco.py  
 with the --tripleTask option
 
-I was able to get the best results training for 20 epochs with a one-cycle cosine annealing learning rate scheduler with a min of 1e-8 and max of 1e-2  
-Scheduler documentation: https://pytorch.org/docs/stable/generated/torch.optim.lr_scheduler.OneCycleLR.html  
+I was able to get the best results training for 20 epochs with a [one-cycle cosine annealing learning rate scheduler](https://pytorch.org/docs/stable/generated/torch.optim.lr_scheduler.OneCycleLR.html) with a min of 1e-8 and max of 1e-2  
 To configure training with these options, use: -e 20 --args.schedOneCycleLR -l 1e-8 -lrM 1e-2  
+
 I trained with a batch size of 64 using 12 cpus for data loading (options: -nbt 64 -nbv 64 -n 12)  
+
 You'll also need to provide:
 * The file paths for the training and validation samples produced during preprocessing with the --train_file and --val_file options
 * The --model_path option to specify an output file path ending in ".pt" for the model checkpoints (these are saved at the end of every epoch, with ".pt" replaced with "_<epoch>.pt")
