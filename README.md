@@ -15,8 +15,9 @@ To get the current best-performing configurations, use:
 
 ## Preprocessing
 
-When training/evaluating the network, I use the following two scripts for preprocessing:  
+When training/evaluating the network, I use the following three scripts for preprocessing:  
 preprocess/prepare_reco_images_cluster.py  
+preprocess/clean_reco_image_file_5class.py  
 preprocess/split_image_file_by_val_num.py
 
 ### main preprocessing script
@@ -42,10 +43,18 @@ These are the ImageTree branches that are needed to actually train and run the n
 
 All of the other branches are for book keeping (e.g. run, subrun, event, and vertex/cluster ID numbers) or for studying the output prong sample.
 
-### splitting output into training/validation samples
-The second script (split_image_file_by_val_num.py) splits the output of prepare_reco_images_cluster.py into training and evaluation samples.  
+### pre-selection script
 
-It will put "args.nVal" prongs from each class into the evaluation sample and all remaining prongs in the training sample.
+The second script (clean_reco_image_file_5class.py) takes the output of prepare_reco_images_cluster.py and applies some basic pre-selection cuts to remove junk prongs:
+* A minimum threshold for the fraction of the prong's visible energy that was produced by a simulated particle (removes cosmic prongs). Set this threshold with the -pS option.
+* A minimum hit threshold. Prongs will be removed if any wire plane does not have at least this number of prong pixels. Set this threshold with the -nH option.
+* A minimum dominant particle purity threshold. Prongs will be removed if there is not a single simulated particle that generates at least this fraction of the prong's visible energy. This is useful for ensuring one can apply a sensible true-particle-type label to each prong in the sample. Set this threshold with the -pD option.
+
+### splitting output into training/validation samples
+
+The third script (split_image_file_by_val_num.py) splits the output of clean_reco_image_file_5class.py into training and evaluation samples.  
+
+It will put N prongs from each class into the evaluation sample and all remaining prongs in the training sample, where N is set by the --nVal option.
 
 After preprocessing, there will be two root files: one containing all of the prong images and labels for prongs in the training sample, and one for the validation sample.
 
