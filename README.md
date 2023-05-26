@@ -56,7 +56,7 @@ train/train_wandb_reco.py
 with the --tripleTask option
 
 I was able to get the best results training for 20 epochs with a [one-cycle cosine annealing learning rate scheduler](https://pytorch.org/docs/stable/generated/torch.optim.lr_scheduler.OneCycleLR.html) with a min of 1e-8 and max of 1e-2  
-To configure training with these options, use: -e 20 --args.schedOneCycleLR -l 1e-8 -lrM 1e-2  
+To configure training with these options, use: -e 20 --schedOneCycleLR -l 1e-8 -lrM 1e-2  
 
 I trained with a batch size of 64 using 12 cpus for data loading (options: -nbt 64 -nbv 64 -n 12)  
 
