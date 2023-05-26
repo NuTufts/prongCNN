@@ -62,7 +62,7 @@ I trained with a batch size of 64 using 12 cpus for data loading (options: -nbt 
 
 You'll also need to provide:
 * The file paths for the training and validation samples produced during preprocessing with the --train_file and --val_file options
-* The --model_path option to specify an output file path ending in ".pt" for the model checkpoints (these are saved at the end of every epoch, with ".pt" replaced with "_<epoch>.pt")
+* The --model_path option to specify an output file path ending in ".pt" for the model checkpoints (these are saved at the end of every epoch, with ".pt" replaced with "_\<epoch\>.pt")
 * The flag --singleGPU if training on only one GPU
 * Optional but recommended: use the argument --runName to set the weights and biases run name (used for logging) </p>
   
