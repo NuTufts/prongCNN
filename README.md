@@ -2,10 +2,11 @@
 
 Files for training and evaluating a MicroBooNE prong CNN for the gen2 deep learning reconstruction framework
 
-The latest iteration of this network performs particle classification, completeness regression, and purity regression for an input reconstructed prong.  
+The latest iteration of this network performs particle classification, completeness regression, and purity regression for an input reconstructed prong. 
 * completeness = the fraction of the true particle that is reconstructed in the input prong  
 * purity = the fraction of the reconstructed prong that is actually from the true particle  
 * In training/evaluation, "the true particle" = the simulated particle that deposited the most energy in the pixels belonging to the input prong (according to MC truth)
+* The defined particle classes are: electrons, photons, muons, pions, and protons
 
 This repository has a variety of training scripts/options, dataset classes, and model classes that setup different network configurations that I've tested.
 
@@ -26,7 +27,7 @@ The first script (prepare_reco_images_cluster.py) is designed to be run on a clu
 
 You'll need to have the [ubdl repository](https://github.com/LArbys/ubdl) compiled and loaded in your environment  
 
-It takes two inputs: a text file containing a list of DLgen2 kpsrecomanagerana larflow reco files, and a text file containing a matching list of merged_dlreco files.  
+The script takes two inputs: a text file containing a list of DLgen2 kpsrecomanagerana larflow reco files, and a text file containing a matching list of merged_dlreco files.  
 
 This script will need to be heavily modified to run in other reconstruction frameworks.  
 
@@ -287,3 +288,85 @@ for ientry in range(kpst.GetEntries()):
     proton_score = prongCNN_out[0][0][4].item()
 
 ```
+
+## Running the network in different reconstruction frameworks (other than DLGen2)
+
+The two main things to consider if attempting to run the network on prongs reconstructed in other reco frameworks are:
+* Reading in LArCV images
+* Coding up a method to select pixels associated with the prong
+
+### Reading in LArCV images
+
+LArCV images are stored in the merged_dlreco files generated for the DL gen1 reconstruction used in the eLEE analysis.
+
+Check out the [LArCV repository](https://github.com/larbys/larcv/tree/ubdl_dev) for the code we use to read in LArCV images from merged_dlreco files. The readme has installation instructions.
+
+There is a LArCV io manager defined in this repo that makes it easy to pull out the image objects.
+
+For an example on how to use the io manager, take a look at the tutorial script: Tutorials/make_event_display.cxx from the [ubdl repository](https://github.com/LArbys/ubdl).
+In particular, take a look at how the ev_in_adc_dlreco and img_2d_in_v objects are defined. The img_2d_in_v object is a vector of the three larcv images (for the three wire planes).
+To get the vector of the three larcv images for wire-cell tagged (out-of-time) cosmic pixels only, replace the string "wire" in the io_larcv->get_data call used
+to define ev_in_adc_dlreco with "thrumu". The following section discusses how to use the full event and cosmic larcv images to do the prong pixel selection in more detail.
+
+Note that actually running this tutorial script will require installing the full ubdl repository (instructions are available in the repo's readme).
+
+### Prong pixel selection
+
+Once you have the reconstructed event from your reco framework loaded, have pulled out a reco prong to pass through the network, and have loaded in the "wire" and "thrumu" larcv images (discussed in the previous section) for the same event, you'll need to indentify the CNN image pixels for that prong.
+
+To do this, I would suggest modifying the make_cropped_initial_sparse_prong_image_reco function from the larflow/larflow/PrepFlowMatchData/FlowTriples.(h,cxx) scripts in the [ubdl repository](https://github.com/LArbys/ubdl). This function takes the following input:
+* the "wire" larcv image
+* the "thrumu" larcv image
+* the reconstructed prong object
+* a point defining the center of the image crop
+* a minimum pixel value threshold to throw out noise
+* the row span for the cropped image
+* the column span for the cropped image
+
+To obtain the existing weights for the trained network, I used a minimm pixel value of 10 and 512 for the row and column spans (to get 512x512 images). You'll need to use those values when running with the pre-trained network.
+
+If the input prong doesn't fit in a 512x512 image, the image is just centered on the input image crop point. I used the track end point for tracks and the shower start point for showers. This choice should be maintained if using the pre-trained network. If the prong does fit in the 512x512 image, the image is cropped (separately in each wire plane) around the middle of the prong.
+
+After defining the pixel boundaries for the cropped image, this function fills and returns six vectors of CropPixData_t objects (see definition in FlowTriples.h).
+Each of these CropPixData_t objects represents one pixel. There are six vectors from 3 wire planes x 2 image types (prong and full event).
+The full event image vector for a given wire plane is filled for all pixels in the 512x512 image that are above the input threshold in the "wire" image
+and below the input threshold in the "thrumu" image. This image is included to provide the network with context information. The prong image is filled with
+pixels that satisfy the same threshold cuts and are also present in the input reco prong (the prong is reconstructed with a hit on the same wire and time tick).
+
+Once you've modified this function to take as input a prong from a different reconstruction framework, you can use the output to:
+* Define an image tensor to pass through the network, as shown in the makeImage function from the example code in the "Running the network without preprocessing" section
+* Modify the preprocess/prepare_reco_images_cluster.py discussed in the "Preprocessing" section to generate a large prong image file to be used for either evaluating or re-training the network (as described in the "Training" and "Evaluation" sections).
+
+## The Trained Network
+
+The file containing the learned weights for the trained network can be found on the uboonegpvms at /pnfs/uboone/persistent/users/mmr/prongCNN/ResNet34_recoProng_5class_epoch20_withLossWeights.pt
+
+This is what you can use as input for the --model_path arguments in the scripts from the "Evaluation" and "Running the network without preprocessing" sections above.
+
+The network was trained using the options discussed in the "Training" section on all DLGen2 prongs from the run3b bnb nu and intrinsic nue overlay samples. More specifically, these input prongs were taken from the following samweb definitions:
+* prodgenie_bnb_overlay_run3b_ssnet_wc_v2_nocrtremerge_run3b_ssnet_merged_dlreco
+* prodgenie_bnb_intrinsic_nue_overlay_run3b_ssnet_wc_v2_nocrtremerge_run3b_ssnet_merged_dlreco
+
+I ran all the reco prongs attached to reco neutrino vertices in these samples through the preprocessing scripts described in the "Preprocessing" section.
+
+To evaluate the network, I pulled out 2000 prongs per particle class (for a total of 10,000 prongs) for the validation sample using the scripts described in that section.
+Since I first aggregated the prong images in a single file before pulling out these 10,000 prongs for validation, I do not have separate
+file lists for training and evaluation prongs. However, the prong image root files generated during preprocessing contain the run/subrun/event information
+for every prong, so if needed you can take a look at the training and validation image files to see which events ended up in which sample (training or validation).
+
+These training and validation prong image files can be found on the uboonegpvms at
+* /pnfs/uboone/persistent/users/mmr/prongCNN/prongCNN_reco_v2me05_images_file_run3bNuAndNueOverlays_preprocess_v02_cleaned_minHit10_noSecondaries_noPurityCut_2000PerClassVal_train.root
+* /pnfs/uboone/persistent/users/mmr/prongCNN/prongCNN_reco_v2me05_images_file_run3bNuAndNueOverlays_preprocess_v02_cleaned_minHit10_noSecondaries_noPurityCut_2000PerClassVal_test.root
+* /pnfs/uboone/persistent/users/mmr/prongCNN/prongCNN_reco_v2me05_images_file_run3bNuAndNueOverlays_preprocess_v02_cleaned_minHit10_noSecondaries_2000PerClassVal_test.root
+
+There is one training file and two validation files.
+The difference is in the cleaning script (clean_reco_image_file_5class.py) discussed in the "Preprocessing" section.
+All three were produced with the options -pS 0.8 and -nH 10.
+The training file and one of the validation files did not have a minimum dominant particle purity threshold (-pD 0).
+These have a "noPurityCut" flag in the filename.
+The validation file without that flag used -pD 0.6.
+I found that including the low purity prongs in the training sample did not worsen the network's performance on high-purity prongs, so they were included for training.
+But you can't assign a robust particle label to a prong if it doesn't have a single particle that generated the majority of it's visible energy, so I also
+included a validation sample with a minimum dominant particle purity threshold of 60% to evaluate the network's particle classification performance.
+Hence the two validation files. Both validation files contain 10,000 prongs, and the training file does not have any overlap with either validation file.
+
