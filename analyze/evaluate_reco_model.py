@@ -98,7 +98,7 @@ if args.plane2only:
         model = ResNet18Pl2(layer0inChans, ResBlock, outputs=nClasses)
     else:
         model = ResNet34Pl2(layer0inChans, ResBlock, outputs=nClasses)
-    if not args.singleGPU:
+    if "cuda" in args.device and not args.singleGPU:
         model = nn.DataParallel(model)
 
 else:
@@ -125,7 +125,7 @@ else:
             model = ResNet34ClCmp(layer0inChans, ResBlock, outputs=nClasses)
         else:
             model = ResNet34(layer0inChans, ResBlock, outputs=nClasses)
-    if not args.singleGPU:
+    if "cuda" in args.device and not args.singleGPU:
         model = nn.DataParallel(model)
 
 
@@ -359,14 +359,20 @@ def test(dataloader, model):
                   pred_pur = outputs[2]
                   yPur = y[2]
                   yPurCl = torch.LongTensor([getCompClass(y[2][i].item()) for i in range(y[2].size(0))])
-                  yPurCl_pred = torch.LongTensor([getCompClass(pred_pur[i].item()) for i in range(pred_pur.size(0))])
+                  if args.batch_size == 1:
+                    yPurCl_pred = torch.LongTensor([getCompClass(pred_pur.item())])
+                  else:
+                    yPurCl_pred = torch.LongTensor([getCompClass(pred_pur[i].item()) for i in range(pred_pur.size(0))])
                 if args.classifyComp:
                   yCompCl = y[1].type(torch.LongTensor)
                   yCompCl_pred = pred_comp.argmax(1)
                 else:
                   yComp = y[1]
                   yCompCl = torch.LongTensor([getCompClass(y[1][i].item()) for i in range(y[1].size(0))])
-                  yCompCl_pred = torch.LongTensor([getCompClass(pred_comp[i].item()) for i in range(pred_comp.size(0))])
+                  if args.batch_size == 1:
+                    yCompCl_pred = torch.LongTensor([getCompClass(pred_comp.item())])
+                  else:
+                    yCompCl_pred = torch.LongTensor([getCompClass(pred_comp[i].item()) for i in range(pred_comp.size(0))])
                 y = y[0].type(torch.LongTensor)
                 y, yCompCl, yCompCl_pred = y.to(args.device), yCompCl.to(args.device), yCompCl_pred.to(args.device)
             elif args.softLabels:
@@ -387,12 +393,18 @@ def test(dataloader, model):
                 for i in range(yCompCl.size(0)):
                   effCountsComp[yCompCl[i].item()].update(yCompCl_pred[i].item())
                   purCountsComp[yCompCl_pred[i].item()].update(yCompCl[i].item())
-                  fillCompHistos(yComp[i].item(), pred_comp[i].item(), yCompCl[i].item(), yCompCl_pred[i].item())
+                  if args.batch_size == 1:
+                    fillCompHistos(yComp[i].item(), pred_comp.item(), yCompCl[i].item(), yCompCl_pred[i].item())
+                  else:
+                    fillCompHistos(yComp[i].item(), pred_comp[i].item(), yCompCl[i].item(), yCompCl_pred[i].item())
                 if args.tripleTask:
                     for i in range(yPurCl.size(0)):
                       effCountsPur[yPurCl[i].item()].update(yPurCl_pred[i].item())
                       purCountsPur[yPurCl_pred[i].item()].update(yPurCl[i].item())
-                      fillPurityHistos(yPur[i].item(), pred_pur[i].item(), yPurCl[i].item(), yPurCl_pred[i].item())
+                      if args.batch_size == 1:
+                        fillPurityHistos(yPur[i].item(), pred_pur.item(), yPurCl[i].item(), yPurCl_pred[i].item())
+                      else:
+                        fillPurityHistos(yPur[i].item(), pred_pur[i].item(), yPurCl[i].item(), yPurCl_pred[i].item())
             
             iEl = (y == 0).nonzero(as_tuple=True)
             iPh = (y == 1).nonzero(as_tuple=True)
