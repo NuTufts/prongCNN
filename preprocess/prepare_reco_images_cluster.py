@@ -31,6 +31,45 @@ truthTrackSCE = ublarcvapp.mctools.TruthTrackSCE()
 truthShowerTrunkSCE = ublarcvapp.mctools.TruthShowerTrunkSCE()
 
 
+#PDG code -> charge
+chargeDict = {
+    22:     0,
+    11:    -1,
+    -11:    1,
+    13:    -1,
+    -13:    1,
+    15:    -1,
+    -15:    1,
+    12:     0,
+    -12:    0,
+    14:     0,
+    -14:    0,
+    16:     0,
+    -16:    0,
+    211:    1,
+    -211:  -1,
+    111:    0,
+    3122:   0,
+    -3122:  0,
+    321:    1,
+    -321:  -1,
+    310:    0,
+    130:    0,
+    3112:  -1,
+    3222:   1,
+    -3112:  1,
+    -3222: -1,
+    3322:   0,
+    -3322:  0,
+    3312:  -1,
+    -3312:  1,
+    2212:   1,
+    -2212: -1,
+    2112:   0,
+    -2112:  0
+}
+
+
 def getFiles(mdlTag, kpsfiles, mdlfiles):
   files = []
   for kpsfile in kpsfiles:
@@ -94,6 +133,7 @@ def getMCProngParticle(sparseimg_vv, mcpg, mcpm, adc_v):
   maxPartPDG = 0 
   maxPartNID = -1
   maxPartTID = -1
+  maxPartProcClass = -1
   maxPartI = 0.
   maxPartComp = 0.
   pdglist = []
@@ -118,6 +158,21 @@ def getMCProngParticle(sparseimg_vv, mcpg, mcpm, adc_v):
     maxPartNode = mcpg.node_v[maxPartNID]
     if maxPartNode.tid != maxPartTID:
       sys.exit("ERROR: mismatch between node track id from mcpm and mcpg in getMCProngParticle")
+    nodeTIDs = []
+    for node in mcpg.node_v:
+      nodeTIDs.append(node.tid)
+    if maxPartNode.process == "primary":
+      maxPartProcClass = 0
+    elif maxPartNode.mtid not in nodeTIDs:
+      maxPartProcClass = 1
+    elif maxPartNode.mother.pid not in chargeDict:
+      maxPartProcClass = 1
+    elif chargeDict[maxPartNode.mother.pid] == 0:
+      maxPartProcClass = 1
+    elif abs(chargeDict[maxPartNode.mother.pid]) == 1:
+      maxPartProcClass = 2
+    else: #shouldn't happen unless I made a mistake
+      maxPartProcClass = -1
     for p in range(3):
       pixels = maxPartNode.pix_vv[p]
       for iP in range(pixels.size()//2):
@@ -131,7 +186,7 @@ def getMCProngParticle(sparseimg_vv, mcpg, mcpm, adc_v):
     print("ERROR: prong completeness calculated to be >1")
 
   #return maxPartPDG, maxPartI/totalPixI, pdglist, puritylist
-  return maxPartPDG, maxPartTID, totNodePixI, maxPartI/totalPixI, maxPartComp, pdglist, puritylist
+  return maxPartPDG, maxPartProcClass, maxPartTID, totNodePixI, maxPartI/totalPixI, maxPartComp, pdglist, puritylist
 
 
 def goodTrack(track):
@@ -208,12 +263,14 @@ outFile = rt.TFile(args.outfile,"RECREATE")
 
 imageTree = rt.TTree("ImageTree","ImageTree")
 nPixels = args.pixelWH*args.pixelWH
+fileid = array('i', [0])
 run = array('i', [0])
 subrun = array('i', [0])
 event = array('i', [0])
 vertex = array('i', [0])
 cluster = array('i', [0])
 pdg = array('i', [0])
+processClass = array('i', [0])
 purity = array('f', [0.])
 completeness = array('f', [0.])
 bestOtherComp = array('f', [0.])
@@ -250,12 +307,14 @@ raw_plane2_nPix = array('i', [0])
 raw_plane2pix_row = array('i', nPixels*[0])
 raw_plane2pix_col = array('i', nPixels*[0])
 raw_plane2pix_val = array('f', nPixels*[0.])
+imageTree.Branch("fileid", fileid, 'fileid/I')
 imageTree.Branch("run", run, 'run/I')
 imageTree.Branch("subrun", subrun, 'subrun/I')
 imageTree.Branch("event", event, 'event/I')
 imageTree.Branch("vertex", vertex, 'vertex/I')
 imageTree.Branch("cluster", cluster, 'cluster/I')
 imageTree.Branch("pdg", pdg, 'pdg/I')
+imageTree.Branch("processClass", processClass, 'processClass/I')
 imageTree.Branch("purity", purity, 'purity/F')
 imageTree.Branch("completeness", completeness, 'completeness/F')
 imageTree.Branch("bestOtherComp", bestOtherComp, 'bestOtherComp/F')
@@ -370,6 +429,11 @@ for filepair in filepairs:
     if not isFiducial(vtxTVec3):
       continue
 
+    fileid[0] = -1
+    for tag in filepair[0].split("_"):
+      if 'fileid' in tag:
+        fileid[0] = int(tag.replace("fileid",""))
+        break
     run[0] = kpst.run
     subrun[0] = kpst.subrun
     event[0] = kpst.event
@@ -408,7 +472,7 @@ for filepair in filepairs:
         continue
 
       #pdg[0], purity[0], pdglist, puritylist = getMCProngParticle(prong_vv, mcpm)
-      pdg[0], trackId, truePixSum, purity[0], completeness[0], pdglist, puritylist = getMCProngParticle(prong_vv, mcpg, mcpm, adc_v)
+      pdg[0], processClass[0], trackId, truePixSum, purity[0], completeness[0], pdglist, puritylist = getMCProngParticle(prong_vv, mcpg, mcpm, adc_v)
       bestOtherComp[0] = 0.
       if truePixSum > 0.:
         bestOtherComp[0] = getBestOtherCompleteness(vertices, vertex[0], iT, -1,
@@ -492,7 +556,7 @@ for filepair in filepairs:
         continue
 
       #pdg[0], purity[0], pdglist, puritylist = getMCProngParticle(prong_vv, mcpm)
-      pdg[0], trackId, truePixSum, purity[0], completeness[0], pdglist, puritylist = getMCProngParticle(prong_vv, mcpg, mcpm, adc_v)
+      pdg[0], processClass[0], trackId, truePixSum, purity[0], completeness[0], pdglist, puritylist = getMCProngParticle(prong_vv, mcpg, mcpm, adc_v)
       bestOtherComp[0] = 0.
       if truePixSum > 0.:
         bestOtherComp[0] = getBestOtherCompleteness(vertices, vertex[0], -1, iS,
