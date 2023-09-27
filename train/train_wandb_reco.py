@@ -55,12 +55,13 @@ parser.add_argument("-sTS", "--startTrainStep", type=int, default=0, help="initi
 parser.add_argument("-sLS", "--startLogStep", type=int, default=0, help="initial wandb logging step number (change if continuing run)")
 parser.add_argument("-sC", "--startCheckpoint", type=str, default="", help="path for model checkpoint to load (change if continuing run)")
 parser.add_argument("-m", "--model_path", type=str, default="/home/mrosenberg/prongCNN/ResNet34_recoProng_b32_plAll.pt", help="model name")
-parser.add_argument("-p", "--projectName", type=str, default="prongCNN-5particle-recoProngs-multiTask", help="wandb project name")
+parser.add_argument("-p", "--projectName", type=str, default="prongCNN-5particle-recoProngs-quadTask", help="wandb project name")
 parser.add_argument("-r", "--runName", type=str, default="DEFAULT", help="wandb run name")
 parser.add_argument("-wLP", "--partLossWeight", type=float, default=0.5, help="weight for particle classification in multi task loss (must specify --multiTask and --hardWeights)")
 parser.add_argument("-dop", "--dropoutProb", type=float, default=0.2, help="dropout probability for class./reg. MLPs (must specify --multiTask and --deepMLPwDO")
 parser.add_argument("--multiTask", action="store_true", help="do particle classification and completeness regression")
 parser.add_argument("--tripleTask", action="store_true", help="do particle classification and completeness and purity regression")
+parser.add_argument("--quadTask", action="store_true", help="do particle and process classification and purity and completeness regression")
 parser.add_argument("--deepMLP", action="store_true", help="use 3 layer MLPs for output tasks")
 parser.add_argument("--deepMLPwBN", action="store_true", help="use 3 layer MLPs with batch norm for output tasks")
 parser.add_argument("--deepMLPwIN", action="store_true", help="use 3 layer MLPs with instance norm for output tasks")
@@ -85,13 +86,18 @@ logStep = args.startLogStep
 if args.multiTask and (args.l0inChans != 2 or args.use6class or args.softLabels or args.noMask or args.plane2only or args.resnet18):
   sys.exit("multiTask training only configured for 5 class hard labels with mask (3 plane, 2 in channel config.) with ResNet34")
 
-if args.tripleTask and (args.l0inChans != 2 or args.use6class or args.softLabels or args.noMask or args.plane2only or args.resnet18 or args.hardWeights or args.multiTask):
+if args.tripleTask and (args.l0inChans != 2 or args.use6class or args.softLabels or args.noMask or args.plane2only or args.resnet18 or args.hardWeights or args.multiTask or args.quadTask):
   sys.exit("tripleTask training only configured for 5 class hard labels with mask (3 plane, 2 in channel config.) with ResNet34 and learnable loss weights")
+
+if args.quadTask and (args.l0inChans != 2 or args.use6class or args.softLabels or args.noMask or args.plane2only or args.resnet18 or args.hardWeights or args.multiTask or args.tripleTask):
+  sys.exit("quadTask training only configured for 5 class hard labels with mask (3 plane, 2 in channel config.) with ResNet34 and learnable loss weights")
 
 if ((args.deepMLP or args.deepMLPwBN or args.deepMLPwIN or args.deepMLPwDO) and not args.multiTask) or ((args.deepMLP or args.deepMLPwBN or args.deepMLPwIN or args.deepMLPwDO) and (args.classifyComp or args.hardWeights)):
   sys.exit("deepMLP options are only implemented for multi task config. with completeness regression and learnable loss weights")
 
-if args.tripleTask:
+if args.quadTask:
+  from models_instanceNorm_reco_2chan_quadTask import ResBlock, ResNet34
+elif args.tripleTask:
   from models_instanceNorm_reco_2chan_tripleTask import ResBlock, ResNet34
 elif args.multiTask:
   from models_instanceNorm_reco_2chan_multiTask import ResBlock, ResNet34, ResNet34ClCmp, ResNet34DeepMLP, ResNet34DeepMLPwBN, ResNet34DeepMLPwIN, ResNet34DeepMLPwDO
@@ -109,7 +115,10 @@ if args.use6class and args.softLabels:
   sys.exit("modules not configured for 6 class soft labels")
 
 nClasses = 5
-if args.tripleTask:
+nProcClasses = 3
+if args.quadTask:
+  from datasets_reco_5ClassHardLabel_quadTask import ProngDataset, mean, std
+elif args.tripleTask:
   from datasets_reco_5ClassHardLabel_tripleTask import ProngDataset, mean, std
 elif args.multiTask:
   from datasets_reco_5ClassHardLabel_multiTask import ProngDataset, ProngDatasetClCmp, mean, std
@@ -224,6 +233,11 @@ if args.multiTask and args.classifyComp:
   print("comp_class_weights:", comp_class_weights)
   lossFnComp = nn.NLLLoss(weight=comp_class_weights)
 
+if args.quadTask:
+  proc_class_weights = compute_class_weight(class_weight='balanced', classes=np.unique(train_dataset.procClasses), y=train_dataset.procClasses)
+  proc_class_weights = torch.tensor(proc_class_weights, dtype=torch.float).to(args.device)
+  print("proc_class_weights:", proc_class_weights)
+
 def softNLLLoss(pred, target):
     return -(class_weights*target*pred).sum() / class_weights.sum()
 
@@ -245,6 +259,8 @@ def softNLLLoss(pred, target):
 
 lossFn = nn.NLLLoss(weight=class_weights) #use if softmax is in model
 #lossFn = nn.CrossEntropyLoss() #use if softmax not in model
+
+lossFnProc = nn.NLLLoss(weight=proc_class_weights)
 
 lossMSEcomp = nn.MSELoss()
 lossMSEpur = nn.MSELoss()
@@ -295,8 +311,23 @@ class TripleTaskLoss(nn.Module):
     loss_total = 2.0*torch.exp(-self.etaC)*loss_class + torch.exp(-self.etaRc)*loss_comp + torch.exp(-self.etaRp)*loss_pur + self.etaC + self.etaRc + self.etaRp
     return [loss_class, loss_comp, loss_pur], loss_total, [self.etaC, self.etaRc, self.etaRp]
 
+class QuadTaskLoss(nn.Module):
+  def __init__(self, wC=0.5, wRc=0.5, wRp=0.5, wCP=0.5):
+    super(QuadTaskLoss, self).__init__()
+    self.etaC = nn.Parameter(torch.Tensor([wC]))
+    self.etaRc = nn.Parameter(torch.Tensor([wRc]))
+    self.etaRp = nn.Parameter(torch.Tensor([wRp]))
+    self.etaCP = nn.Parameter(torch.Tensor([wCP]))
+  def forward(self, outputs, targets):
+    loss_class = lossFn(outputs[0], targets[0])
+    loss_comp = lossMSEcomp(outputs[1], targets[1])
+    loss_pur = lossMSEpur(outputs[2], targets[2])
+    loss_classProc = lossFnProc(outputs[3], targets[3])
+    loss_total = 2.0*torch.exp(-self.etaC)*loss_class + torch.exp(-self.etaRc)*loss_comp + torch.exp(-self.etaRp)*loss_pur + 2.0*torch.exp(-self.etaCP)*loss_classProc + self.etaC + self.etaRc + self.etaRp + self.etaCP
+    return [loss_class, loss_comp, loss_pur, loss_classProc], loss_total, [self.etaC, self.etaRc, self.etaRp, self.etaCP]
 
-initialLossWeights = [0.5, 0.5, 0.5]
+
+initialLossWeights = [0.5, 0.5, 0.5, 0.5]
 if args.startCheckpoint != "":
   checkpoint = torch.load(args.startCheckpoint)
   if args.multiTask:
@@ -306,6 +337,14 @@ if args.startCheckpoint != "":
     initialLossWeights[0] = checkpoint['weight_state_dict']['etaC']
     initialLossWeights[1] = checkpoint['weight_state_dict']['etaRc']
     initialLossWeights[2] = checkpoint['weight_state_dict']['etaRp']
+  if args.quadTask:
+    initialLossWeights[0] = checkpoint['weight_state_dict']['etaC']
+    initialLossWeights[1] = checkpoint['weight_state_dict']['etaRc']
+    initialLossWeights[2] = checkpoint['weight_state_dict']['etaRp']
+    initialLossWeights[3] = checkpoint['weight_state_dict']['etaCP']
+
+if args.quadTask:
+  lossMulti = QuadTaskLoss(initialLossWeights[0], initialLossWeights[1], initialLossWeights[2], initialLossWeights[3]).to(args.device)
 
 if args.tripleTask:
   lossMulti = TripleTaskLoss(initialLossWeights[0], initialLossWeights[1], initialLossWeights[2]).to(args.device)
@@ -318,7 +357,7 @@ if args.multiTask:
   else:
     lossMulti = MultiTaskLoss(initialLossWeights[0], initialLossWeights[1]).to(args.device)
 
-if (args.multiTask and not args.hardWeights) or args.tripleTask:
+if (args.multiTask and not args.hardWeights) or args.tripleTask or args.quadTask:
   optimizer = AdamW(list(lossMulti.parameters())+list(model.parameters()), lr=args.learning_rate)
 else:
   optimizer = AdamW(model.parameters(), lr=args.learning_rate)
@@ -356,7 +395,7 @@ elif args.schedOneCycleLR:
 def test(dataloader, n_batches=-1):
     
     model.eval()
-    if args.multiTask or args.tripleTask:
+    if args.multiTask or args.tripleTask or args.quadTask:
         lossMulti.eval()
     
     totalTestLoss = 0
@@ -375,12 +414,21 @@ def test(dataloader, n_batches=-1):
     total_o = 0
     testSteps = len(dataloader.dataset) // dataloader.batch_size
     tstep = 0
-    if args.tripleTask:
+    if args.tripleTask or args.quadTask:
       totalClassLoss = 0.
       totalCompLoss = 0.
       totalPurLoss = 0.
       totalCompErrorSqSum = 0.
       totalPurErrorSqSum = 0.
+    if args.quadTask:
+      totalProcLoss = 0.
+      testProcCorrect = 0
+      testCorrect_p0 = 0
+      testCorrect_p1 = 0
+      testCorrect_p2 = 0
+      total_p0 = 0
+      total_p1 = 0
+      total_p2 = 0
     if args.multiTask:
       totalClassLoss = 0.
       totalCompLoss = 0.
@@ -404,7 +452,26 @@ def test(dataloader, n_batches=-1):
                 break
             if tstep % args.log_frequency == 0:
                 print("reached validation batch %i of %i"%(tstep, testSteps), flush=True)
-            if args.tripleTask:
+            if args.quadTask:
+                yComp = y[1]
+                yPur = y[2]
+                yProc = y[3].type(torch.int64)
+                y = y[0].type(torch.LongTensor)
+                X, y, yComp, yPur, yProc = X.to(args.device), y.to(args.device), yComp.to(args.device), yPur.to(args.device), yProc.to(args.device)
+                outputs = model(X)
+                losses, loss, lossWeights = lossMulti(outputs, [y, yComp, yPur, yProc])
+                pred = outputs[0].to(args.device)
+                pred_comp = outputs[1].to(args.device)
+                pred_pur = outputs[2].to(args.device)
+                pred_proc = outputs[3].to(args.device)
+                totalTestLoss += loss.detach().item()
+                totalClassLoss += losses[0].detach().item()
+                totalCompLoss += losses[1].detach().item()
+                totalPurLoss += losses[2].detach().item()
+                totalProcLoss += losses[3].detach().item()
+                totalCompErrorSqSum += torch.square(torch.sub(yComp, pred_comp)).sum().item()
+                totalPurErrorSqSum += torch.square(torch.sub(yPur, pred_pur)).sum().item()
+            elif args.tripleTask:
                 yComp = y[1]
                 yPur = y[2]
                 y = y[0].type(torch.LongTensor)
@@ -476,6 +543,24 @@ def test(dataloader, n_batches=-1):
             if y[iOt].size(dim=0) > 0:
                 testCorrect_o += (pred[iOt].argmax(1) == y[iOt]).type(torch.float).sum().item()
 
+            if args.quadTask:
+
+                iP0 = (yProc == 0).nonzero(as_tuple=True)
+                iP1 = (yProc == 1).nonzero(as_tuple=True)
+                iP2 = (yProc == 2).nonzero(as_tuple=True)
+
+                total_p0 += yProc[iP0].size(dim=0)
+                total_p1 += yProc[iP1].size(dim=0)
+                total_p2 += yProc[iP2].size(dim=0)
+
+                testProcCorrect += (pred_proc.argmax(1) == yProc).type(torch.float).sum().item()
+                if yProc[iP0].size(dim=0) > 0:
+                    testCorrect_p0 += (pred_proc[iP0].argmax(1) == yProc[iP0]).type(torch.float).sum().item()
+                if yProc[iP1].size(dim=0) > 0:
+                    testCorrect_p1 += (pred_proc[iP1].argmax(1) == yProc[iP1]).type(torch.float).sum().item()
+                if yProc[iP2].size(dim=0) > 0:
+                    testCorrect_p2 += (pred_proc[iP2].argmax(1) == yProc[iP2]).type(torch.float).sum().item()
+
             if args.multiTask and args.classifyComp:
 
                 iC0 = (yComp == 0).nonzero(as_tuple=True)
@@ -513,12 +598,18 @@ def test(dataloader, n_batches=-1):
     testAcc_pi = testCorrect_pi / total_pi if (total_pi > 0) else -1.
     testAcc_pr = testCorrect_pr / total_pr if (total_pr > 0) else -1.
     testAcc_o = testCorrect_o / total_o if (total_o > 0) else -1.
-    if args.tripleTask:
+    if args.tripleTask or args.quadTask:
       avgClassLoss = totalClassLoss / tstep
       avgCompLoss = totalCompLoss / tstep
       avgPurLoss = totalPurLoss / tstep
       testCompRMSE = sqrt( totalCompErrorSqSum / (tstep*dataloader.batch_size) )
       testPurRMSE = sqrt( totalPurErrorSqSum / (tstep*dataloader.batch_size) )
+    if args.quadTask:
+      avgProcLoss = totalProcLoss / tstep
+      testProcAcc = testProcCorrect / (tstep*dataloader.batch_size)
+      testProcAcc_p0 = testCorrect_p0 / total_p0 if (total_p0 > 0) else -1.
+      testProcAcc_p1 = testCorrect_p1 / total_p1 if (total_p1 > 0) else -1.
+      testProcAcc_p2 = testCorrect_p2 / total_p2 if (total_p2 > 0) else -1.
     if args.multiTask:
       avgClassLoss = totalClassLoss / tstep
       avgCompLoss = totalCompLoss / tstep
@@ -532,6 +623,8 @@ def test(dataloader, n_batches=-1):
       else:
         testRMSE = sqrt( totalErrorSqSum / (tstep*dataloader.batch_size) )
 
+    if args.quadTask:
+      return avgTestLoss, avgClassLoss, testAcc, testAcc_e, testAcc_ph, testAcc_mu, testAcc_pi, testAcc_pr, testAcc_o, avgCompLoss, testCompRMSE, avgPurLoss, testPurRMSE, avgProcLoss, testProcAcc, testProcAcc_p0, testProcAcc_p1, testProcAcc_p2
     if args.tripleTask:
       return avgTestLoss, avgClassLoss, testAcc, testAcc_e, testAcc_ph, testAcc_mu, testAcc_pi, testAcc_pr, testAcc_o, avgCompLoss, testCompRMSE, avgPurLoss, testPurRMSE
     if args.multiTask:
@@ -545,7 +638,7 @@ def test(dataloader, n_batches=-1):
 def train(train_dataloader, test_dataloader, step, logStep, epoch):
 
     model.train()
-    if args.multiTask or args.tripleTask:
+    if args.multiTask or args.tripleTask or args.quadTask:
         lossMulti.train()
 
     totalTrainLoss = 0
@@ -553,12 +646,15 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
     trainSteps = len(train_dataloader.dataset) // train_dataloader.batch_size
     dataloading_time = 0.
     backprop_time = 0.
-    if args.tripleTask:
+    if args.tripleTask or args.quadTask:
       totalClassLoss = 0.
       totalCompLoss = 0.
       totalPurLoss = 0.
       totalCompErrorSqSum = 0.
       totalPurErrorSqSum = 0.
+    if args.quadTask:
+      totalProcLoss = 0.
+      trainProcCorrect = 0
     if args.multiTask:
       totalClassLoss = 0.
       totalCompLoss = 0.
@@ -568,7 +664,19 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
     start = time.time()
     for batch, (X,y) in enumerate(train_dataloader):
         dataloading_time += time.time() - start
-        if args.tripleTask:
+        if args.quadTask:
+            yComp = y[1]
+            yPur = y[2]
+            yProc = y[3].type(torch.LongTensor)
+            y = y[0].type(torch.LongTensor)
+            X, y, yComp, yPur, yProc = X.to(args.device), y.to(args.device), yComp.to(args.device), yPur.to(args.device), yProc.to(args.device)
+            outputs = model(X)
+            losses, loss, lossWeights = lossMulti(outputs, [y, yComp, yPur, yProc])
+            pred = outputs[0].to(args.device)
+            pred_comp = outputs[1].to(args.device)
+            pred_pur = outputs[2].to(args.device)
+            pred_proc = outputs[3].to(args.device)
+        elif args.tripleTask:
             yComp = y[1]
             yPur = y[2]
             y = y[0].type(torch.LongTensor)
@@ -613,7 +721,7 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
         batchCorrect = (pred.argmax(1) == y).type(torch.float).sum().item()
         trainCorrect += batchCorrect
         batchAcc = batchCorrect / train_dataloader.batch_size
-        if args.tripleTask:
+        if args.tripleTask or args.quadTask:
             lossClassVal = losses[0].detach().item()
             lossCompVal = losses[1].detach().item()
             lossPurVal = losses[2].detach().item()
@@ -629,6 +737,13 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
             lossWClassVal = lossWeights[0].detach().item()
             lossWCompVal = lossWeights[1].detach().item()
             lossWPurVal = lossWeights[2].detach().item()
+        if args.quadTask:
+            lossProcVal = losses[3].detach().item()
+            totalProcLoss += lossProcVal
+            lossWProcVal = lossWeights[3].detach().item()
+            batchProcCorrect = (pred_proc.argmax(1) == yProc).type(torch.float).sum().item()
+            trainProcCorrect += batchProcCorrect
+            batchProcAcc = batchProcCorrect / train_dataloader.batch_size
         if args.multiTask:
             lossClassVal = losses[0].detach().item()
             lossCompVal = losses[1].detach().item()
@@ -648,7 +763,9 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
 
         if step % args.log_frequency == 0:
             print("reached training batch %i of %i"%(batch, trainSteps), flush=True)
-            if args.tripleTask:
+            if args.quadTask:
+              valLoss, valClassLoss, valAcc, valAcc_e, valAcc_ph, valAcc_mu, valAcc_pi, valAcc_pr, valAcc_o, valCompLoss, valCompRMSE, valPurLoss, valPurRMSE, valProcLoss, valProcAcc, valAcc_p0, valAcc_p1, valAcc_p2 = test(test_dataloader, args.n_val_batches)
+            elif args.tripleTask:
               valLoss, valClassLoss, valAcc, valAcc_e, valAcc_ph, valAcc_mu, valAcc_pi, valAcc_pr, valAcc_o, valCompLoss, valCompRMSE, valPurLoss, valPurRMSE = test(test_dataloader, args.n_val_batches)
             elif args.multiTask:
               if args.classifyComp:
@@ -661,7 +778,23 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
               currentLR = args.learning_rate
               if args.schedStepLR or useNonStepScheduler:
                 currentLR = optimizer.param_groups[0]["lr"]
-              if args.tripleTask:
+              if args.quadTask:
+                wandb.log({"train_loss": lossVal, "train_class_loss": lossClassVal, "train_class_acc": batchAcc,
+                           "train_comp_loss": lossCompVal, "train_comp_rmse": batchCompRMSE,
+                           "train_purity_loss": lossPurVal, "train_purity_rmse": batchPurRMSE,
+                           "train_process_loss": lossProcVal, "train_process_acc": batchProcAcc,
+                           "val_loss": valLoss, "val_class_loss": valClassLoss, "val_acc": valAcc,
+                           "val_comp_loss": valCompLoss, "val_comp_rmse": valCompRMSE,
+                           "val_purity_loss": valPurLoss, "val_purity_rmse": valPurRMSE,
+                           "val_process_loss": valProcLoss, "val_process_acc": valProcAcc,
+                           "val_electron_acc": valAcc_e, "val_photon_acc": valAcc_ph, "val_muon_acc": valAcc_mu,
+                           "val_pion_acc": valAcc_pi, "val_proton_acc": valAcc_pr,
+                           "val_procPrimary_acc": valAcc_p0, "val_procNeutralParent_acc": valAcc_p1,
+                           "val_procChargedParent_acc": valAcc_p2,
+                           "class_loss_weight": lossWClassVal, "comp_loss_weight":lossWCompVal,
+                           "purity_loss_weight":lossWPurVal, "process_loss_weight":lossWProcVal,
+                           "epoch": epoch, "step": step, "learning_rate": currentLR}, step=logStep)
+              elif args.tripleTask:
                 wandb.log({"train_loss": lossVal, "train_class_loss": lossClassVal, "train_class_acc": batchAcc,
                            "train_comp_loss": lossCompVal, "train_comp_rmse": batchCompRMSE,
                            "train_purity_loss": lossPurVal, "train_purity_rmse": batchPurRMSE,
@@ -712,7 +845,7 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
                              "epoch": epoch, "step": step, "learning_rate": currentLR}, step=logStep)
             logStep += 1
             model.train()
-            if args.multiTask or args.tripleTask:
+            if args.multiTask or args.tripleTask or args.quadTask:
                 lossMulti.train()
 
         step += 1
@@ -723,12 +856,15 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
         
     avgTrainLoss = totalTrainLoss / trainSteps
     trainAcc = trainCorrect / len(train_dataloader.dataset)
-    if args.tripleTask:
+    if args.tripleTask or args.quadTask:
       avgClassLoss = totalClassLoss /  trainSteps
       avgCompLoss = totalCompLoss / trainSteps
       avgPurLoss = totalPurLoss / trainSteps
       trainCompRMSE = sqrt( totalCompErrorSqSum / len(train_dataloader.dataset) )
       trainPurRMSE = sqrt( totalPurErrorSqSum / len(train_dataloader.dataset) )
+    if args.quadTask:
+      avgProcLoss = totalProcLoss / trainSteps
+      trainProcAcc = trainProcCorrect / len(train_dataloader.dataset)
     if args.multiTask:
       avgClassLoss = totalClassLoss /  trainSteps
       avgCompLoss = totalCompLoss / trainSteps
@@ -740,6 +876,8 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
     print("total time spent loading data:   ", dataloading_time, flush=True)
     print("total time spent doing backprop: ", backprop_time, flush=True)
 
+    if args.quadTask:
+      return step, logStep, avgTrainLoss, avgClassLoss, trainAcc, avgCompLoss, trainCompRMSE, avgPurLoss, trainPurRMSE, avgProcLoss, trainProcAcc
     if args.tripleTask:
       return step, logStep, avgTrainLoss, avgClassLoss, trainAcc, avgCompLoss, trainCompRMSE, avgPurLoss, trainPurRMSE
     if args.multiTask:
@@ -758,7 +896,22 @@ for e in range(args.startEpoch, args.epochs+args.startEpoch):
       if e > 1 and ascending and args.cyclicLRMode == "log_triangular2":
         schedLRMax = (args.schedLRBase/args.schedLRMax)**(1./(nCycles))*schedLRMax
       optimizer.param_groups[0]["lr"] = lambda1(step)*args.learning_rate #override bug when switching directions
-  if args.tripleTask:
+  if args.quadTask:
+    step, logStep, trL, trClL, trA, trCoL, trCoRMSE, trPuL, trPuRMSE, trPrL, trPrA = train(train_dataloader, test_dataloader, step, logStep, e)
+    teL, teClL, teA, teA_e, teA_ph, teA_mu, teA_pi, teA_pr, teA_o, teCoL, teCoRMSE, tePuL, tePuRMSE, tePrL, tePrA, tePrA0, tePrA1, tePrA2 = test(test_dataloader)
+    print("EPOCH:", e, " train total loss:", trL, " train class loss:", trClL, " train class accuracy:", trA,
+          " train comp loss:", trCoL, " train comp RMSE:", trCoRMSE,
+          " train purity loss:", trPuL, " train purity RMSE:", trPuRMSE,
+          " train process loss:", trPrL, " train process accuracy:", trPrA,
+          " test total loss:", teL, " test class loss:", teClL, " test class accuracy:", teA,
+          " test comp loss:", teCoL, " test comp RMSE:", teCoRMSE,
+          " test purity loss:", tePuL, " test purity RMSE:", tePuRMSE,
+          " test process loss:", tePrL, " test process accuracy:", tePrA,
+          " electron test accuracy:", teA_e, " photon test accuracy:", teA_ph, " muon test accuracy:", teA_mu,
+          " pion test accuracy:", teA_pi, " proton test accuracy:", teA_pr, " other test accuracy:", teA_o,
+          " primary process test accuracy:", tePrA0, " neutral parent test accuracy:", tePrA1,
+          " charged parent test accuracy:", tePrA2, flush=True)
+  elif args.tripleTask:
     step, logStep, trL, trClL, trA, trCoL, trCoRMSE, trPuL, trPuRMSE = train(train_dataloader, test_dataloader, step, logStep, e)
     teL, teClL, teA, teA_e, teA_ph, teA_mu, teA_pi, teA_pr, teA_o, teCoL, teCoRMSE, tePuL, tePuRMSE = test(test_dataloader)
     print("EPOCH:", e, " train total loss:", trL, " train class loss:", trClL, " train class accuracy:", trA,
@@ -809,6 +962,15 @@ for e in range(args.startEpoch, args.epochs+args.startEpoch):
     weight_state_dict = {'etaC': lossMulti.etaC.detach().item(),
                          'etaRc': lossMulti.etaRc.detach().item(),
                          'etaRp': lossMulti.etaRp.detach().item()}
+    torch.save({'model_state_dict': model.state_dict(), 
+                'optimizer_state_dict': optimizer.state_dict(),
+                'weight_state_dict': weight_state_dict},
+               args.model_path.replace(".pt", "_epoch%i.pt"%e))
+  elif args.quadTask:
+    weight_state_dict = {'etaC': lossMulti.etaC.detach().item(),
+                         'etaRc': lossMulti.etaRc.detach().item(),
+                         'etaRp': lossMulti.etaRp.detach().item(),
+                         'etaCP': lossMulti.etaCP.detach().item()}
     torch.save({'model_state_dict': model.state_dict(), 
                 'optimizer_state_dict': optimizer.state_dict(),
                 'weight_state_dict': weight_state_dict},
