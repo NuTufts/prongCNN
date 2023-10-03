@@ -220,7 +220,7 @@ if args.multiTask or args.tripleTask or args.quadTask:
   h_comp_trueBin4.SetLineColor(rt.kRed)
   h_comp_trueBin4.GetXaxis().SetTitle("predicted completeness")
 
-  h_comp_heatmap = rt.TH2F("h_comp_heatmap","Predicted vs. True Completeness, Validation Sample",26,0,1.04,26,0,1.04)
+  h_comp_heatmap = rt.TH2F("h_comp_heatmap","Predicted vs. True Completeness, Validation Sample",51,0,1.02,51,0,1.02)
   h_comp_heatmap.GetXaxis().SetTitle("true completeness")
   h_comp_heatmap.GetYaxis().SetTitle("predicted completeness")
   
@@ -268,7 +268,7 @@ if args.multiTask or args.tripleTask or args.quadTask:
     h_pur_trueBin4.SetLineColor(rt.kRed)
     h_pur_trueBin4.GetXaxis().SetTitle("predicted purity")
 
-    h_pur_heatmap = rt.TH2F("h_pur_heatmap","Predicted vs. True Purity, Validation Sample",26,0,1.04,26,0,1.04)
+    h_pur_heatmap = rt.TH2F("h_pur_heatmap","Predicted vs. True Purity, Validation Sample",51,0,1.02,51,0,1.02)
     h_pur_heatmap.GetXaxis().SetTitle("true purity")
     h_pur_heatmap.GetYaxis().SetTitle("predicted purity")
 
