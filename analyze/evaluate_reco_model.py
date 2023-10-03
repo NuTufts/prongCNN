@@ -25,6 +25,7 @@ parser.add_argument("-c", "--l0inChans", type=int, default=2, help="number of in
 parser.add_argument("-o", "--outfile", type=str, default="evaluate_reco_model_output_plots.root", help="name of output root file with completeness and purity histograms")
 parser.add_argument("--multiTask", action="store_true", help="do particle classification and completeness regression")
 parser.add_argument("--tripleTask", action="store_true", help="do particle classification and completeness and purity regression")
+parser.add_argument("--quadTask", action="store_true", help="do particle and process classification and purity and completeness regression")
 parser.add_argument("--classifyComp", action="store_true", help="do classification instead of regression for completeness")
 parser.add_argument("--use6class", action="store_true", help="use 6 classes (include other label)")
 parser.add_argument("--softLabels", action="store_true", help="use soft labels for loss")
@@ -41,10 +42,15 @@ rt.gStyle.SetOptStat(0)
 if args.multiTask and (args.l0inChans != 2 or args.use6class or args.softLabels or args.noMask or args.plane2only or args.resnet18):
   sys.exit("multiTask training only configured for 5 class hard labels with mask (3 plane, 2 in channel config.) with ResNet34")
 
-if args.tripleTask and (args.l0inChans != 2 or args.use6class or args.softLabels or args.noMask or args.plane2only or args.resnet18 or args.multiTask):
+if args.tripleTask and (args.l0inChans != 2 or args.use6class or args.softLabels or args.noMask or args.plane2only or args.resnet18 or args.multiTask or args.quadTask):
   sys.exit("tripleTask training only configured for 5 class hard labels with mask (3 plane, 2 in channel config.) with ResNet34 and learnable loss weights")
 
-if args.tripleTask:
+if args.quadTask and (args.l0inChans != 2 or args.use6class or args.softLabels or args.noMask or args.plane2only or args.resnet18 or args.multiTask or args.tripleTask):
+  sys.exit("quadTask training only configured for 5 class hard labels with mask (3 plane, 2 in channel config.) with ResNet34 and learnable loss weights")
+
+if args.quadTask:
+  from models_instanceNorm_reco_2chan_quadTask import ResBlock, ResNet34
+elif args.tripleTask:
   from models_instanceNorm_reco_2chan_tripleTask import ResBlock, ResNet34
 elif args.multiTask:
   from models_instanceNorm_reco_2chan_multiTask import ResBlock, ResNet34, ResNet34ClCmp
@@ -62,7 +68,11 @@ if args.use6class and args.softLabels:
   sys.exit("modules not configured for 6 class soft labels")
 
 nClasses = 5
-if args.tripleTask:
+nProcClasses = 3
+if args.quadTask:
+  from datasets_reco_5ClassHardLabel_quadTask import ProngDataset, mean, std
+  from datasets_reco_5ClassHardLabel_multiTask import getCompClass
+elif args.tripleTask:
   from datasets_reco_5ClassHardLabel_tripleTask import ProngDataset, mean, std
   from datasets_reco_5ClassHardLabel_multiTask import getCompClass
 elif args.multiTask:
@@ -157,8 +167,16 @@ class fiveClassCounter:
         self.n += 1
         self.n_match[match] += 1
 
+class threeClassCounter:
+    def __init__(self):
+        self.n = 0
+        self.n_match = [0,0,0]
+    def update(self, match):
+        self.n += 1
+        self.n_match[match] += 1
 
-if args.multiTask or args.tripleTask:
+
+if args.multiTask or args.tripleTask or args.quadTask:
 
   h_comp_predBin0 = rt.TH1F("h_comp_predBin0","True Completeness Distributions, Validation Sample",51,0,1.02)
   h_comp_predBin0.SetLineWidth(2)
@@ -206,7 +224,7 @@ if args.multiTask or args.tripleTask:
   h_comp_heatmap.GetXaxis().SetTitle("true completeness")
   h_comp_heatmap.GetYaxis().SetTitle("predicted completeness")
   
-  if args.tripleTask:
+  if args.tripleTask or args.quadTask:
 
     h_pur_predBin0 = rt.TH1F("h_pur_predBin0","True Purity Distributions, Validation Sample",51,0,1.02)
     h_pur_predBin0.SetLineWidth(2)
@@ -327,6 +345,13 @@ def test(dataloader, model):
     total_pi = 0
     total_pr = 0
     total_o = 0
+    testProcCorrect = 0
+    testCorrect_p0 = 0
+    testCorrect_p1 = 0
+    testCorrect_p2 = 0
+    total_p0 = 0
+    total_p1 = 0
+    total_p2 = 0
     testSteps = len(dataloader.dataset) // dataloader.batch_size
     tstep = 0
     
@@ -345,17 +370,20 @@ def test(dataloader, model):
     purCountsPur = {0: fiveClassCounter(), 1: fiveClassCounter(), 2: fiveClassCounter(),
                      3: fiveClassCounter(), 4: fiveClassCounter()} 
 
+    effCountsProc = {0: threeClassCounter(), 1: threeClassCounter(), 2: threeClassCounter()}
+    purCountsProc = {0: threeClassCounter(), 1: threeClassCounter(), 2: threeClassCounter()}
+
     with torch.no_grad():
         
         for batch, (X, y) in enumerate(dataloader):
             if tstep % 10 == 0:
                 print("reached validation batch %i of %i"%(tstep, testSteps), flush=True)
-            if args.multiTask or args.tripleTask:
+            if args.multiTask or args.tripleTask or args.quadTask:
                 X = X.to(args.device)
                 outputs = model(X)
                 pred = outputs[0]
                 pred_comp = outputs[1]
-                if args.tripleTask:
+                if args.tripleTask or args.quadTask:
                   pred_pur = outputs[2]
                   yPur = y[2]
                   yPurCl = torch.LongTensor([getCompClass(y[2][i].item()) for i in range(y[2].size(0))])
@@ -373,6 +401,10 @@ def test(dataloader, model):
                     yCompCl_pred = torch.LongTensor([getCompClass(pred_comp.item())])
                   else:
                     yCompCl_pred = torch.LongTensor([getCompClass(pred_comp[i].item()) for i in range(pred_comp.size(0))])
+                if args.quadTask:
+                  yProc = y[3].type(torch.LongTensor).to(args.device)
+                  pred_proc = outputs[3].to(args.device)
+                  yProc_pred = pred_proc.argmax(1)
                 y = y[0].type(torch.LongTensor)
                 y, yCompCl, yCompCl_pred = y.to(args.device), yCompCl.to(args.device), yCompCl_pred.to(args.device)
             elif args.softLabels:
@@ -389,7 +421,12 @@ def test(dataloader, model):
                 effCounts[y[i].item()].update(y_pred[i].item())
                 purCounts[y_pred[i].item()].update(y[i].item())
 
-            if args.multiTask or args.tripleTask:
+            if args.quadTask:
+                for i in range(yProc.size(0)): 
+                  effCountsProc[yProc[i].item()].update(yProc_pred[i].item())
+                  purCountsProc[yProc_pred[i].item()].update(yProc[i].item())
+
+            if args.multiTask or args.tripleTask or args.quadTask:
                 for i in range(yCompCl.size(0)):
                   effCountsComp[yCompCl[i].item()].update(yCompCl_pred[i].item())
                   purCountsComp[yCompCl_pred[i].item()].update(yCompCl[i].item())
@@ -397,7 +434,7 @@ def test(dataloader, model):
                     fillCompHistos(yComp[i].item(), pred_comp.item(), yCompCl[i].item(), yCompCl_pred[i].item())
                   else:
                     fillCompHistos(yComp[i].item(), pred_comp[i].item(), yCompCl[i].item(), yCompCl_pred[i].item())
-                if args.tripleTask:
+                if args.tripleTask or args.quadTask:
                     for i in range(yPurCl.size(0)):
                       effCountsPur[yPurCl[i].item()].update(yPurCl_pred[i].item())
                       purCountsPur[yPurCl_pred[i].item()].update(yPurCl[i].item())
@@ -434,6 +471,24 @@ def test(dataloader, model):
             if y[iOt].size(dim=0) > 0:
                 testCorrect_o += (pred[iOt].argmax(1) == y[iOt]).type(torch.float).sum().item()
 
+            if args.quadTask:
+
+                iP0 = (yProc == 0).nonzero(as_tuple=True)
+                iP1 = (yProc == 1).nonzero(as_tuple=True)
+                iP2 = (yProc == 2).nonzero(as_tuple=True)
+
+                total_p0 += yProc[iP0].size(dim=0)
+                total_p1 += yProc[iP1].size(dim=0)
+                total_p2 += yProc[iP2].size(dim=0)
+
+                testProcCorrect += (pred_proc.argmax(1) == yProc).type(torch.float).sum().item()
+                if yProc[iP0].size(dim=0) > 0:
+                    testCorrect_p0 += (pred_proc[iP0].argmax(1) == yProc[iP0]).type(torch.float).sum().item()
+                if yProc[iP1].size(dim=0) > 0:
+                    testCorrect_p1 += (pred_proc[iP1].argmax(1) == yProc[iP1]).type(torch.float).sum().item()
+                if yProc[iP2].size(dim=0) > 0:
+                    testCorrect_p2 += (pred_proc[iP2].argmax(1) == yProc[iP2]).type(torch.float).sum().item()
+
             tstep += 1
             
     testAcc = testCorrect / len(dataloader.dataset)
@@ -442,18 +497,20 @@ def test(dataloader, model):
     testAcc_mu = testCorrect_mu / total_mu
     testAcc_pi = testCorrect_pi / total_pi
     testAcc_pr = testCorrect_pr / total_pr
-    testAcc_o = 0.
-    if total_o > 0:
-        testAcc_o = testCorrect_o / total_o
+    testAcc_o = testCorrect_o / total_o if (total_o > 0) else 0.
+    testProcAcc = testProcCorrect / len(dataloader.dataset)
+    testProcAcc_p0 = testCorrect_p0 / total_p0 if (total_p0 > 0) else -1.
+    testProcAcc_p1 = testCorrect_p1 / total_p1 if (total_p1 > 0) else -1.
+    testProcAcc_p2 = testCorrect_p2 / total_p2 if (total_p2 > 0) else -1.
     
-    return testAcc, testAcc_e, testAcc_ph, testAcc_mu, testAcc_pi, testAcc_pr, testAcc_o, effCounts, purCounts, effCountsComp, purCountsComp, effCountsPur, purCountsPur
+    return testAcc, testAcc_e, testAcc_ph, testAcc_mu, testAcc_pi, testAcc_pr, testAcc_o, effCounts, purCounts, effCountsComp, purCountsComp, effCountsPur, purCountsPur, effCountsProc, purCountsProc, testProcAcc, testProcAcc_p0, testProcAcc_p1, testProcAcc_p2
 
 
 
 
 
-teA, teA_e, teA_ph, teA_mu, teA_pi, teA_pr, teA_o, effCounts, purCounts, effCountsComp, purCountsComp, effCountsPur, purCountsPur = test(dataloader, model)
-print("test accuracy:", teA, " electron test accuracy:", teA_e, " photon test accuracy:", teA_ph, " muon test accuracy:", teA_mu, " pion test accuracy:", teA_pi, " proton test accuracy:", teA_pr, " other test accuracy:", teA_o, flush=True)
+teA, teA_e, teA_ph, teA_mu, teA_pi, teA_pr, teA_o, effCounts, purCounts, effCountsComp, purCountsComp, effCountsPur, purCountsPur, effCountsProc, purCountsProc, tePA, tePA_0, tePA_1, tePA_2  = test(dataloader, model)
+print("test accuracy:", teA, " electron test accuracy:", teA_e, " photon test accuracy:", teA_ph, " muon test accuracy:", teA_mu, " pion test accuracy:", teA_pi, " proton test accuracy:", teA_pr, " other test accuracy:", teA_o, " process accuracy:", tePA, " primary process accuracy:", tePA_0, " neutral parent accuracy:", tePA_1, " charged parent accuracy:", tePA_2, flush=True)
 
 print("PARTICLE CLASSIFICATION RESULTS:")
 for i in range(6):
@@ -507,6 +564,25 @@ for i in range(5):
         ratio = 0.
         if purCountsPur[i].n > 0:
             ratio = purCountsPur[i].n_match[j]/purCountsPur[i].n
+        print("    %i: %f"%(j, ratio))
+
+print()
+print()
+
+print("PROCESS CLASSIFICATION RESULTS:")
+for i in range(3):
+    print("true class %i matches (%i instances):"%(i, effCountsProc[i].n))
+    for j in range(3):
+        ratio = 0.
+        if effCountsProc[i].n > 0:
+            ratio = effCountsProc[i].n_match[j]/effCountsProc[i].n
+        print("    %i: %f"%(j, ratio))
+for i in range(3):
+    print("pred class %i matches (%i instances):"%(i, purCountsProc[i].n))
+    for j in range(3):
+        ratio = 0.
+        if purCountsProc[i].n > 0:
+            ratio = purCountsProc[i].n_match[j]/purCountsProc[i].n
         print("    %i: %f"%(j, ratio))
 
 
