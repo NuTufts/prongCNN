@@ -82,7 +82,7 @@ You'll also need to provide:
 To evaluate the performance of the network using your full validation sample, you can use:  
 analyze/evaluate_reco_model.py
 
-This script will output information needed for particle classification confusion matrices, as well as some plots showing completeness/purity regression performance
+This script will output information needed for particle/process classification confusion matrices, as well as some plots showing completeness/purity regression performance
 
 You'll need to provide:
 * The --quadTask flag to load the correct model configuration
