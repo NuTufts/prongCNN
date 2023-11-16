@@ -2,17 +2,18 @@
 
 Files for training and evaluating a MicroBooNE prong CNN for the gen2 deep learning reconstruction framework
 
-The latest iteration of this network performs particle classification, completeness regression, and purity regression for an input reconstructed prong. 
+The latest iteration of this network performs particle classification, production process classification, completeness regression, and purity regression for an input reconstructed prong. 
 * completeness = the fraction of the true particle that is reconstructed in the input prong  
 * purity = the fraction of the reconstructed prong that is actually from the true particle  
 * In training/evaluation, "the true particle" = the simulated particle that deposited the most energy in the pixels belonging to the input prong (according to MC truth)
 * The defined particle classes are: electrons, photons, muons, pions, and protons
+* The defined production process classes are: primary particle from neutrino interaction, secondary particle with a charged parent, and secondary particle with a neutral parent
 
 This repository has a variety of training scripts/options, dataset classes, and model classes that setup different network configurations that I've tested.
 
 To get the current best-performing configurations, use:  
-* The ProngDataset class (inherits from torch.utils.data.Dataset) from models/datasets_reco_5ClassHardLabel_tripleTask.py  
-* The ResNet34 class (inherits from torch.nn.Module) from models/models_instanceNorm_reco_2chan_tripleTask.py
+* The ProngDataset class (inherits from torch.utils.data.Dataset) from models/datasets_reco_5ClassHardLabel_quadTask.py  
+* The ResNet34 class (inherits from torch.nn.Module) from models/models_instanceNorm_reco_2chan_quadTask.py
 
 ## Preprocessing
 
@@ -63,7 +64,7 @@ After preprocessing, there will be two root files: one containing all of the pro
 
 To train the network with the latest and greatest configuration, use:  
 train/train_wandb_reco.py  
-with the --tripleTask option
+with the --quadTask option
 
 I was able to get the best results training for 20 epochs with a [one-cycle cosine annealing learning rate scheduler](https://pytorch.org/docs/stable/generated/torch.optim.lr_scheduler.OneCycleLR.html) with a min of 1e-8 and max of 1e-2  
 To configure training with these options, use: -e 20 --schedOneCycleLR -l 1e-8 -lrM 1e-2  
@@ -84,7 +85,7 @@ analyze/evaluate_reco_model.py
 This script will output information needed for particle classification confusion matrices, as well as some plots showing completeness/purity regression performance
 
 You'll need to provide:
-* The --tripleTask flag to load the correct model configuration
+* The --quadTask flag to load the correct model configuration
 * The input sample with the --images_file option (this should be the validation sample file produced during the preprocessing step)
 * The file path for the model checkpoint to load with the --model_path option (this is created during the training step)
 * The file path for the output root file containing the completeness/purity performance plots
@@ -136,8 +137,8 @@ args = parser.parse_args()
 #load the model class and mean, standard deviation for pixel normalization
 #this code assumes the checkpoint file is stored in a "checkpoints" directory inside the models/ folder in this repo
 sys.path.append(args.model_path[:args.model_path.find("/checkpoints")])
-from models_instanceNorm_reco_2chan_tripleTask import ResBlock, ResNet34
-from datasets_reco_5ClassHardLabel_tripleTask import mean, std
+from models_instanceNorm_reco_2chan_quadTask import ResBlock, ResNet34
+from datasets_reco_5ClassHardLabel_quadTask import mean, std
 
 #load the model. the following code will get things to work regardless if running on cpu, single gpu, or multiple gpus
 model = ResNet34(2, ResBlock, outputs=5)
@@ -169,7 +170,7 @@ iolcv.add_in_file("<file name>")
 iolcv.reverse_all_products()
 iolcv.initialize()
 
-#define function to convert CNN output class to PDG score
+#define function to convert CNN output class to PDG
 def getPID(cnnClass):
   if cnnClass == 0:
     return 11
@@ -255,7 +256,7 @@ for ientry in range(kpst.GetEntries()):
   thrumu_v = csmImage2D.Image2DArray()
   
   #loop over vertices (kpst.nuvetoed_v in DLgen2) and select desired vertex
-  vertex = <vurrent vertex in loop, identified neutrino vertex, or whatever vertex you want>
+  vertex = <current vertex in loop, identified neutrino vertex, or whatever vertex you want>
   
   #loop over reconstructed 3D clusters (tracks or showers):
   #In DLGen2, cluster_vector should be vertex.track_hitcluster_v when looping over tracks and vertex.shower_v if looping over showers
@@ -280,12 +281,18 @@ for ientry in range(kpst.GetEntries()):
     comp = prongCNN_out[1].item()
     #purity prediction:
     purity = prongCNN_out[2].item()
+    #predicted production process (0: primary, 1: secondary with neutral parent, 2: secondary with charged parent)
+    process = prongCNN_out[3].argmax(1).item()
     #individual particle scores (pid variable above assigned to particle type with highest score)
     electron_score = prongCNN_out[0][0][0].item()
     photon_score = prongCNN_out[0][0][1].item()
     muon_score = prongCNN_out[0][0][2].item()
     pion_score = prongCNN_out[0][0][3].item()
     proton_score = prongCNN_out[0][0][4].item()
+    #individual process scores (process variable above assigned to process type with highest score)
+    primary_score = prongCNN_out[3][0][0].item()
+    neutralParent_score = prongCNN_out[3][0][1].item()
+    chargedParent_score = prongCNN_out[3][0][2].item()
 
 ```
 
@@ -339,7 +346,7 @@ Once you've modified this function to take as input a prong from a different rec
 
 ## The Trained Network
 
-The file containing the learned weights for the trained network can be found on the uboonegpvms at /pnfs/uboone/persistent/users/mmr/prongCNN/ResNet34_recoProng_5class_epoch20_withLossWeights.pt
+The file containing the learned weights for the trained network can be found on the uboonegpvms at /uboone/data/users/mmr/prongCNN/ResNet34_recoProng_5class_epoch20.pt
 
 This is what you can use as input for the --model_path arguments in the scripts from the "Evaluation" and "Running the network without preprocessing" sections above.
 
@@ -355,18 +362,16 @@ file lists for training and evaluation prongs. However, the prong image root fil
 for every prong, so if needed you can take a look at the training and validation image files to see which events ended up in which sample (training or validation).
 
 These training and validation prong image files can be found on the uboonegpvms at
-* /pnfs/uboone/persistent/users/mmr/prongCNN/prongCNN_reco_v2me05_images_file_run3bNuAndNueOverlays_preprocess_v02_cleaned_minHit10_noSecondaries_noPurityCut_2000PerClassVal_train.root
-* /pnfs/uboone/persistent/users/mmr/prongCNN/prongCNN_reco_v2me05_images_file_run3bNuAndNueOverlays_preprocess_v02_cleaned_minHit10_noSecondaries_noPurityCut_2000PerClassVal_test.root
-* /pnfs/uboone/persistent/users/mmr/prongCNN/prongCNN_reco_v2me05_images_file_run3bNuAndNueOverlays_preprocess_v02_cleaned_minHit10_noSecondaries_2000PerClassVal_test.root
+* /uboone/data/users/mmr/prongCNN/prongCNN_reco_v2me05_images_file_run3bNuAndNueOverlays_preprocess_v03_cleaned_minHit10_noSecondaries_noPurityCut_2000PerClassVal_train.root
+* /uboone/data/users/mmr/prongCNN/prongCNN_reco_v2me05_images_file_run3bNuAndNueOverlays_preprocess_v03_cleaned_minHit10_noSecondaries_noPurityCut_2000PerClassVal_test.root
+* /uboone/data/users/mmr/prongCNN/prongCNN_reco_v2me05_images_file_run3bNuAndNueOverlays_preprocess_v03_cleaned_minHit10_noSecondaries_noPurityCut_2000PerClassVal_test_lowPurityRemoved.root
 
 There is one training file and two validation files.
-The difference is in the cleaning script (clean_reco_image_file_5class.py) discussed in the "Preprocessing" section.
+The difference comes from the cleaning script (clean_reco_image_file_5class.py) discussed in the "Preprocessing" section.
 All three were produced with the options -pS 0.8 and -nH 10.
-The training file and one of the validation files did not have a minimum dominant particle purity threshold (-pD 0).
-These have a "noPurityCut" flag in the filename.
-The validation file without that flag used -pD 0.6.
+The training file and both validation files were all originally produced without a minimum dominant particle purity threshold (-pD 0).
+The validation file with the "lowPurityRemoved" flag was passed back through the cleaning script with -pD 0.6 to remove prongs with purity < 60%.
 I found that including the low purity prongs in the training sample did not worsen the network's performance on high-purity prongs, so they were included for training.
-But you can't assign a robust particle label to a prong if it doesn't have a single particle that generated the majority of it's visible energy, so I also
-included a validation sample with a minimum dominant particle purity threshold of 60% to evaluate the network's particle classification performance.
-Hence the two validation files. Both validation files contain 10,000 prongs, and the training file does not have any overlap with either validation file.
+But you can't assign a robust particle label to a prong if it doesn't have a single simulated particle that generated the majority of it's visible energy, so I also
+included a validation sample with a minimum dominant particle purity threshold of 60% to evaluate the network's particle classification performance (hence the two validation files).
 
