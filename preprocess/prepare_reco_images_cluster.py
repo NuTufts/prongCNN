@@ -11,10 +11,11 @@ from math import sqrt as sqrt
 from math import acos as acos
 
 parser = argparse.ArgumentParser("Prepare Prong CNN Images Training File")
-parser.add_argument("-if", "--recofiles", required=True, type=str, help="text file containing kpsreco file list")
-parser.add_argument("-it", "--truthfiles", required=True, type=str, help="text file containing merged_dlreco file list")
-parser.add_argument("-ia", "--arrayID", required=True, type=int, help="SLURM array ID")
-parser.add_argument("-in", "--nfiles", required=True, type=int, help="number of input files to process")
+parser.add_argument("-if", "--recofiles", required=True, type=str, nargs="+", help="input kpsreco files")
+parser.add_argument("-it", "--truthfiles", required=True, type=str, help="text file containing merged_dlreco list or merged_dlreco file for single input")
+parser.add_argument("-ia", "--arrayID", type=int, default=0, help="SLURM array ID for file list inputs")
+parser.add_argument("-in", "--nfiles", type=int, default=1, help="number of input files to process for file list inputs")
+parser.add_argument("-ana", "--dlana_input", help="using merged_dlana input files", action="store_true")
 parser.add_argument("-o", "--outfile", type=str, default="prongCNN_images_file.root", help="output file name")
 parser.add_argument("-n", "--pixelWH", type=int, default=512, help="pixel width and height of image")
 parser.add_argument("-t", "--pixelThresh", type=float, default=10., help="pixel threshold for image generation")
@@ -352,20 +353,34 @@ imageTree.Branch("raw_plane2pix_row", raw_plane2pix_row, 'raw_plane2pix_row[raw_
 imageTree.Branch("raw_plane2pix_col", raw_plane2pix_col, 'raw_plane2pix_col[raw_plane2_nPix]/I')
 imageTree.Branch("raw_plane2pix_val", raw_plane2pix_val, 'raw_plane2pix_val[raw_plane2_nPix]/F')
 
-recolist = []
-recofiles = open(args.recofiles,"r")
-iF = 0
-for line in recofiles:
-  if iF < args.arrayID*args.nfiles:
-    iF += 1
-    continue
-  if iF >= (args.arrayID + 1)*args.nfiles:
-    break
-  recolist.append(line.replace("\n",""))
-  iF += 1
-recofiles.close()
+reco2Tag = "merged_dlreco_"
+if args.dlana_input:
+  reco2Tag = "merged_dlana_"
 
-filepairs = getFiles("merged_dlreco_", recolist, args.truthfiles)
+filepairs = []
+
+if ".root" in args.truthfiles and len(args.recofiles) == 1 and ".root" in args.recofiles[0]:
+  filepairs = [ [args.recofiles[0], args.truthfiles] ]
+else:
+  if len(args.recofiles) == 1 and ".txt" in args.recofiles[0] and ".txt" in args.truthfiles:
+    recolist = []
+    recofiles = open(args.recofiles[0],"r")
+    iF = 0
+    for line in recofiles:
+      if iF < args.arrayID*args.nfiles:
+        iF += 1
+        continue
+      if iF >= (args.arrayID + 1)*args.nfiles:
+        break
+      recolist.append(line.replace("\n",""))
+      iF += 1
+    recofiles.close()
+    filepairs = getFiles(reco2Tag, recolist, args.truthfiles)
+  if ".root" in args.recofiles[0] and ".txt" in args.truthfiles:
+    filepairs = getFiles(reco2Tag, args.recofiles, args.truthfiles)
+
+if len(filepairs) == 0:
+  sys.exit("ERROR: couldn't construct input file pair list from provided options")
 
 
 #-------- begin file loop -----------------------------------------------------#

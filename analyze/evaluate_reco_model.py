@@ -376,7 +376,7 @@ def test(dataloader, model):
     with torch.no_grad():
         
         for batch, (X, y) in enumerate(dataloader):
-            if tstep % 10 == 0:
+            if tstep % 100 == 0:
                 print("reached validation batch %i of %i"%(tstep, testSteps), flush=True)
             if args.multiTask or args.tripleTask or args.quadTask:
                 X = X.to(args.device)
