@@ -54,6 +54,7 @@ parser.add_argument("-sE", "--startEpoch", type=int, default=1, help="first epoc
 parser.add_argument("-sTS", "--startTrainStep", type=int, default=0, help="initial training step number (change if continuing run)")
 parser.add_argument("-sLS", "--startLogStep", type=int, default=0, help="initial wandb logging step number (change if continuing run)")
 parser.add_argument("-sC", "--startCheckpoint", type=str, default="", help="path for model checkpoint to load (change if continuing run)")
+parser.add_argument("-ssC","--schedulerStartCheckpoint", type=str, default="", help="path for scheduler checkpoint to load (change if continuing run with lr scheduler)")
 parser.add_argument("-m", "--model_path", type=str, default="/home/mrosenberg/prongCNN/ResNet34_recoProng_b32_plAll.pt", help="model name")
 parser.add_argument("-p", "--projectName", type=str, default="prongCNN-5particle-recoProngs-quadTask", help="wandb project name")
 parser.add_argument("-r", "--runName", type=str, default="DEFAULT", help="wandb run name")
@@ -388,7 +389,12 @@ elif args.schedCyclicLR:
 elif args.schedCosAnnealWRLR:
   scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=lrStepSize, eta_min=args.schedLRBase)
 elif args.schedOneCycleLR:
-  scheduler = OneCycleLR(optimizer, max_lr=args.schedLRMax, steps_per_epoch=itersPerEpoch, epochs=args.epochs, anneal_strategy='cos')
+  if args.schedulerStartCheckpoint != "":
+    schedulerDict = torch.load(args.schedulerStartCheckpoint)
+    scheduler = OneCycleLR(optimizer, max_lr=args.schedLRMax, steps_per_epoch=itersPerEpoch, epochs=args.epochs, anneal_strategy='cos', last_epoch=schedulerDict["last_epoch"])
+    scheduler.load_state_dict(schedulerDict)
+  else:
+    scheduler = OneCycleLR(optimizer, max_lr=args.schedLRMax, steps_per_epoch=itersPerEpoch, epochs=args.epochs, anneal_strategy='cos')
 
 
 
@@ -889,7 +895,7 @@ def train(train_dataloader, test_dataloader, step, logStep, epoch):
 
 
 
-for e in range(args.startEpoch, args.epochs+args.startEpoch):
+for e in range(args.startEpoch, args.epochs+1):
   if args.cyclicLRMode in ["log_triangular","log_triangular2"]:
     if (e - 1) % args.schedLRStepSize == 0:
       ascending = not ascending
