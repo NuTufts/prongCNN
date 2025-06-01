@@ -201,9 +201,13 @@ def checkCompleteness(flowTriples, adc_v, thrumu_v, prongCluster, cropPt,
                       mcpm, mcTID, truePixSum, bestComp):
   prong_vv = flowTriples.make_cropped_initial_sparse_prong_image_reco(adc_v, thrumu_v,
    prongCluster, cropPt, args.pixelThresh, args.pixelWH, args.pixelWH)
+  print("checkCompleteness: make prong_vv. ",prong_vv.size())
   matchedSum = 0.
   for p in range(3):
-    for pix in prong_vv[p]:
+    prong_v = prong_vv.at(p)
+    print("  prong_v[plane=",p,"]: ",prong_v.size())
+    for ipix in range(prong_v.size()):
+      pix = prong_v.at(ipix)
       pixContents = mcpm.getPixContent(p, pix.rawRow, pix.rawCol)
       for part in pixContents.particles:
         if part.tid == mcTID:
