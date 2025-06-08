@@ -9,6 +9,7 @@ parser.add_argument("-f", "--infile", required=True, type=str, help="input prong
 parser.add_argument("-pS", "--min5ClassPurity", type=float, default=0.8, help="minimum value for sum of 5-class-particle purity contributions")
 parser.add_argument("-pD", "--minDomPartPurity", type=float, default=0.6, help="minimum value for purity contribution of dominant particle")
 parser.add_argument("-nH", "--minNHit", type=int, default=10, help="minimum number of hits in any plane")
+parser.add_argument("-nP", "--minNPlanes", type=int, default=2, help="minimum number of planes that satisfied the min hits condiction. default=2")
 args = parser.parse_args()
 
 f_orig = rt.TFile(args.infile)
@@ -47,9 +48,17 @@ for e in range(t_orig.GetEntries()):
     #  pMax = t_orig.purities[i]
     #  pMaxClass = pidClass
   #if pSum5Class > args.min5ClassPurity and pMax > args.minDomPartPurity and pMaxClass < 5:
-  if pSum5Class > args.min5ClassPurity and t_orig.purity > args.minDomPartPurity and getPIDClass(abs(t_orig.pdg)) < 5:
-    if t_orig.plane0_nPix >= args.minNHit or t_orig.plane1_nPix >= args.minNHit or t_orig.plane2_nPix >= args.minNHit:
-      t_out.Fill()
+
+  num_good_planes = 0
+  for npix in [t_orig.plane0_nPix,t_orig.plane1_nPix,t_orig.plane2_nPix]:
+    if npix >= args.minNHit:
+      num_good_planes += 1
+  
+  if ( pSum5Class > args.min5ClassPurity and
+       t_orig.purity > args.minDomPartPurity and
+       getPIDClass(abs(t_orig.pdg)) < 5 and
+       num_good_planes >= args.minNPlanes ):
+    t_out.Fill()
 
 f_out.cd()
 t_out.Write("",rt.TObject.kOverwrite)

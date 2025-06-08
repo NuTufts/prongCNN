@@ -2,7 +2,7 @@
 
 JOBSTARTDATE=$(date)
 
-OFFSET=70
+OFFSET=0
 STRIDE=85
 # for debug
 #SLURM_ARRAY_TASK_ID=0
@@ -14,12 +14,11 @@ WORKDIR=/cluster/tufts/wongjiradlabnu/twongj01/gen2/photon_analysis/prongCNN/
 UBDL_DIR=/cluster/tufts/wongjiradlabnu/twongj01/gen2/photon_analysis/ubdl/
 OUTPUT_DIR=${WORKDIR}/output/
 OUTPUT_LOGDIR=${WORKDIR}/logdir/
+FILTER_DIR=${WORKDIR}/filtered_output/
 FILELIST=/cluster/tufts/wongjiradlabnu/twongj01/gen2/photon_analysis/prongCNN/utils/filepairs.txt
-SCRIPTNAME=prepare_reco_images_cluster.py
+SCRIPTNAME=clean_reco_image_file_5class.py
 
-mkdir -p ${OUTPUT_DIR}
-mkdir -p ${OUTPUT_LOGDIR}
-
+mkdir -p ${FILTER_DIR}
 
 # WE WANT TO RUN MULTIPLE FILES PER JOB IN ORDER TO BE GRID EFFICIENT
 start_jobid=$(( ${OFFSET} + ${SLURM_ARRAY_TASK_ID}*${STRIDE}  ))
@@ -51,37 +50,34 @@ for ((i=0;i<${STRIDE};i++)); do
   
     # GET INPUT FILENAME
     let lineno=${jobid}+1
-    inputfile=`sed -n ${lineno}p ${FILELIST} | awk '{print $1}'`
+    #inputfile=`sed -n ${lineno}p ${FILELIST} | awk '{print $1}'`
     dlrecofile=`sed -n ${lineno}p ${FILELIST} | awk '{print $2}'`
-    baseinput=$(basename $inputfile)
+    #baseinput=$(basename $inputfile)
     basereco=$(basename $dlrecofile)
-
-    echo "copy over ${inputfile}"
-    echo "copy over ${dlrecofile}"
-    cp $inputfile $baseinput
-    cp $dlrecofile $basereco
-    chmod u+w $baseinput
     outname=`echo ${basereco} | sed 's|larflowreco|prongCNNdata|g' | sed 's|\_kpsrecomanagerana||g'`
-    CMD="python3 ${SCRIPTNAME} -if ${basereco} -it ${baseinput} -ia ${jobid} -o ${outname}"
+    outpath=${OUTPUT_DIR}/${outname}
+
+    echo "Copy input ${outpath}"
+    cp ${outpath} .
+
+    filteredname=`echo ${outname} | sed 's|\.root|\_cleaned\_minHit10\_noSecondaries\.root|g'`
+    echo ${filteredname}
+    
+    CMD="python3 ${SCRIPTNAME} -f ${outname}"
     echo $CMD
     $CMD
 
-    echo "remove local copy: ${baseinput}"
-    echo "remove local copy: ${basereco}"
-    rm -f $baseinput
-    rm -f $basereco
-
-    echo "copy over output: ${outname} to ${OUTPUT_DIR}"
-    cp $outname ${OUTPUT_DIR}/
+    echo "copy over output: ${filteredname} to ${FILTER_DIR}"
+    ls -lh
+    cp ${filteredname} ${FILTER_DIR}/
 done
+
+#cp *.root ${FILTER_DIR}/
 
 JOBENDDATE=$(date)
 
 echo "Job began at $JOBSTARTDATE"
 echo "Job ended at $JOBENDDATE"
-
-# copy log to logdir
-#cp $local_logfile $OUTPUT_LOGDIR/
 
 # clean-up
 cd /tmp

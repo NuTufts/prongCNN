@@ -7,11 +7,27 @@ from array import array
 
 parser = argparse.ArgumentParser("Count Reco Prong CNN Image Classes")
 parser.add_argument("-f", "--infile", required=True, type=str, help="input prongCNN images root file")
+parser.add_argument("-l", "--islist", action="store_true", default=False, help="If given, treat input as textfile with many events")
 parser.add_argument("--writeOutput", action="store_true", help="write output to root file")
 args = parser.parse_args()
 
-f = rt.TFile(args.infile)
-t = f.Get("ImageTree")
+#f = rt.TFile(args.infile)
+#t = f.Get("ImageTree")
+
+t = rt.TChain("ImageTree")
+if not args.islist:
+  t.Add( args.infile )
+else:
+  print("Loading inputlist")
+  with open(args.infile,"r") as finput:
+    ll = finput.readlines()
+    for l in ll:
+      l = l.strip()
+      if not os.path.exists(l):
+        raise ValueError("Could not load this file")
+      t.Add(l)
+      
+NENTRIES=t.GetEntries()
 
 def getClass(pid, purity):
   if purity < 0.6:

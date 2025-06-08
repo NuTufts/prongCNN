@@ -1,4 +1,3 @@
-
 import os,sys,argparse
 import ROOT as rt
 from larlite import larlite
@@ -201,11 +200,11 @@ def checkCompleteness(flowTriples, adc_v, thrumu_v, prongCluster, cropPt,
                       mcpm, mcTID, truePixSum, bestComp):
   prong_vv = flowTriples.make_cropped_initial_sparse_prong_image_reco(adc_v, thrumu_v,
    prongCluster, cropPt, args.pixelThresh, args.pixelWH, args.pixelWH)
-  print("checkCompleteness: make prong_vv. ",prong_vv.size())
+  #print("checkCompleteness: make prong_vv. ",prong_vv.size())
   matchedSum = 0.
   for p in range(3):
     prong_v = prong_vv.at(p)
-    print("  prong_v[plane=",p,"]: ",prong_v.size())
+    #print("  prong_v[plane=",p,"]: ",prong_v.size())
     for ipix in range(prong_v.size()):
       pix = prong_v.at(ipix)
       pixContents = mcpm.getPixContent(p, pix.rawRow, pix.rawCol)
@@ -415,8 +414,10 @@ for filepair in filepairs:
   iolcv.initialize()
 
   #++++++ begin entry loop ++++++++++++++++++++++++++++++++++++++++++++++++++++=
-  for iE in range(ioll.get_entries()):
+  NENTRIES=ioll.get_entries()
+  for iE in range(NENTRIES):
 
+    print(f"[ENTRY {iE} of {NENTRIES}]")
     kpst.GetEntry(iE)
     ioll.go_to(iE)
     iolcv.read_entry(iE)
