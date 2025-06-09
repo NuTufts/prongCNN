@@ -19,6 +19,7 @@ parser.add_argument("-o", "--outfile", type=str, default="prongCNN_images_file.r
 parser.add_argument("-n", "--pixelWH", type=int, default=512, help="pixel width and height of image")
 parser.add_argument("-t", "--pixelThresh", type=float, default=10., help="pixel threshold for image generation")
 parser.add_argument("-m", "--minPixelCount", type=int, default=10, help="minimum number of pixels in each plane")
+parser.add_argument("-p", "--minGoodPlanes", type=int, default=2, help="minimum number of planes with enough pixels [default: 2]")
 parser.add_argument("-v", "--vertexScoreCut", type=float, default=0.8, help="minimum vertex larmatch keypoint score")
 parser.add_argument("-s", "--split", action="store_true", help="split output into training and validation samples")
 parser.add_argument("-f", "--splitfrac", type=float, default=0.8, help="fraction of input to use for training if splitting files")
@@ -114,7 +115,9 @@ def getMCProngParticle(sparseimg_vv, mcpg, mcpm, adc_v):
   totalPixI = 0.
 
   for p in range(3):
-    for pix in sparseimg_vv[p]:
+    npixels = sparseimg_vv[p].size()
+    for ipix in range(npixels):
+      pix = sparseimg_vv[p].at(ipix)
       totalPixI += pix.val
       pixContents = mcpm.getPixContent(p, pix.rawRow, pix.rawCol)
       #for part in pixContents:
@@ -287,6 +290,7 @@ purities = array('f', 10*[0.])
 isShower = array('i', [0])
 isSecondary = array('i', [0])
 max_plane_nPix = array('i', [0])
+num_good_planes = array('i',[0])
 plane0_nPix = array('i', [0])
 plane0pix_row = array('i', nPixels*[0])
 plane0pix_col = array('i', nPixels*[0])
@@ -331,6 +335,7 @@ imageTree.Branch("purities", purities, 'purities[nParticles]/F')
 imageTree.Branch("isShower", isShower, 'isShower/I')
 imageTree.Branch("isSecondary", isSecondary, 'isSecondary/I')
 imageTree.Branch("max_plane_nPix", max_plane_nPix, 'max_plane_nPix/I')
+imageTree.Branch("num_good_planes", num_good_planes, 'num_good_planes/I')
 imageTree.Branch("plane0_nPix", plane0_nPix, 'plane0_nPix/I')
 imageTree.Branch("plane0pix_row", plane0pix_row, 'plane0pix_row[plane0_nPix]/I')
 imageTree.Branch("plane0pix_col", plane0pix_col, 'plane0pix_col[plane0_nPix]/I')
@@ -484,12 +489,17 @@ for filepair in filepairs:
       prong_vv = flowTriples.make_cropped_initial_sparse_prong_image_reco(adc_v, thrumu_v,
                   nuVertex.track_hitcluster_v[iT], cropPt, args.pixelThresh, args.pixelWH, args.pixelWH)
       skip = False
+      nplanes = 0
       for p in range(3):
-        if prong_vv[p].size() < args.minPixelCount:
-          skip = True
-          break
+        if prong_vv[p].size() >= args.minPixelCount:
+          nplanes += 1
+      if nplanes<args.minGoodPlanes:
+        skip = True
+        
       if skip:
         continue
+
+      print(f"Make Track Prong Image Index[{iT}] Num Good Planes={nplanes} ==============")
 
       #pdg[0], purity[0], pdglist, puritylist = getMCProngParticle(prong_vv, mcpm)
       pdg[0], processClass[0], trackId, truePixSum, purity[0], completeness[0], pdglist, puritylist = getMCProngParticle(prong_vv, mcpg, mcpm, adc_v)
@@ -497,6 +507,10 @@ for filepair in filepairs:
       if truePixSum > 0.:
         bestOtherComp[0] = getBestOtherCompleteness(vertices, vertex[0], iT, -1,
          flowTriples, adc_v, thrumu_v, mcpm, trackId, truePixSum)
+
+      print("  Purity: ",purity[0])
+      print("  Completeness: ",completeness[0])
+      print("  PDG: ",pdg[0])
 
       nParticles[0] = len(pdglist)
       for iTP in range(len(pdglist)):
@@ -509,54 +523,95 @@ for filepair in filepairs:
 
       trueEnergy[0], trueTheta[0], trueEdgeDist[0] = getTruePartInfo(ioll, trackId, pdg[0])
 
-      iP = 0
-      for pix in prong_vv[0]:
-        plane0pix_row[iP] = pix.row
-        plane0pix_col[iP] = pix.col
-        plane0pix_val[iP] = pix.val
-        iP += 1
-      plane0_nPix[0] = iP
-      max_plane_nPix[0] = iP
-      iP = 0
-      for pix in prong_vv[1]:
-        plane1pix_row[iP] = pix.row
-        plane1pix_col[iP] = pix.col
-        plane1pix_val[iP] = pix.val
-        iP += 1
-      plane1_nPix[0] = iP
-      if iP > max_plane_nPix[0]:
-        max_plane_nPix[0] = iP
-      iP = 0
-      for pix in prong_vv[2]:
-        plane2pix_row[iP] = pix.row
-        plane2pix_col[iP] = pix.col
-        plane2pix_val[iP] = pix.val
-        iP += 1
-      plane2_nPix[0] = iP
-      if iP > max_plane_nPix[0]:
-        max_plane_nPix[0] = iP
+      max_plane_nPix[0] = 0
+      image_vars = [
+        [plane0pix_row,plane0pix_col,plane0pix_val,array('i',[0]),plane0_nPix],
+        [plane1pix_row,plane1pix_col,plane1pix_val,array('i',[0]),plane1_nPix],
+        [plane2pix_row,plane2pix_col,plane2pix_val,array('i',[0]),plane2_nPix],
+        [raw_plane0pix_row,raw_plane0pix_col,raw_plane0pix_val,array('i',[0]),raw_plane0_nPix],
+        [raw_plane1pix_row,raw_plane1pix_col,raw_plane1pix_val,array('i',[0]),raw_plane1_nPix],
+        [raw_plane2pix_row,raw_plane2pix_col,raw_plane2pix_val,array('i',[0]),raw_plane2_nPix]
+      ]
+      num_good_planes[0] = nplanes
+
+      for iplane, (planeXpix_row, planeXpix_col, planeXpix_val, nbad, planeX_nPix) in enumerate(image_vars):
+        planeX_nPix[0] = prong_vv[iplane].size()
+        nbad[0] = 0
+        print(f"  Track ProngImage[{iplane}] npixels=%d"%(planeX_nPix[0]))
+        for iP in range(prong_vv[iplane].size()):
+          pix = prong_vv[iplane].at(iP)
+          planeXpix_row[iP] = pix.row
+          planeXpix_col[iP] = pix.col
+          planeXpix_val[iP] = pix.val
+          if pix.col<0 or pix.row<0 or pix.col>=args.pixelWH or pix.row>=args.pixelWH:
+            nbad[0] += 1
+            
+        if nbad[0]>0:
+          raise ValueError(f"  prong_vv[{iplane}] has bad pixels. nbad=%d"%(nbad[0]))
         
-      iP = 0
-      for pix in prong_vv[3]:
-        raw_plane0pix_row[iP] = pix.row
-        raw_plane0pix_col[iP] = pix.col
-        raw_plane0pix_val[iP] = pix.val
-        iP += 1
-      raw_plane0_nPix[0] = iP
-      iP = 0
-      for pix in prong_vv[4]:
-        raw_plane1pix_row[iP] = pix.row
-        raw_plane1pix_col[iP] = pix.col
-        raw_plane1pix_val[iP] = pix.val
-        iP += 1
-      raw_plane1_nPix[0] = iP
-      iP = 0
-      for pix in prong_vv[5]:
-        raw_plane2pix_row[iP] = pix.row
-        raw_plane2pix_col[iP] = pix.col
-        raw_plane2pix_val[iP] = pix.val
-        iP += 1
-      raw_plane2_nPix[0] = iP
+        if iplane<3 and planeX_nPix[0]>max_plane_nPix[0]:    
+          max_plane_nPix[0] = planeX_nPix[0]
+          
+      # replaced below with a proper loop
+      # plane0_nPix[0] = prong_vv[0].size()
+      # plane0_badpixels = 0
+      # for iP in range(prong_vv[0].size()):
+      #   pix = prong_vv[0].at(iP)
+      #   plane0pix_row[iP] = pix.row
+      #   plane0pix_col[iP] = pix.col
+      #   plane0pix_val[iP] = pix.val
+      #   if pix.col<0 or pix.row<0 or pix.col>=args.pixelWH or pix.row>=args.pixelWH:
+      #     plane0_badpixels += 1
+      # max_plane_nPix[0] = iP
+      
+      # plane1_nPix[0] = prong_vv[1].size()
+      # plane1_badpixels = 0
+      # for iP in range(prong_vv[1].size()):
+      #   pix = prong_vv[1].at(iP)
+      #   plane1pix_row[iP] = pix.row
+      #   plane1pix_col[iP] = pix.col
+      #   plane1pix_val[iP] = pix.val
+      #   if pix.col<0 or pix.row<0 or pix.col>=args.pixelWH or pix.row>=args.pixelWH:
+      #     plane1_badpixels += 1
+      # if prong_vv[1].size() > max_plane_nPix[0]:
+      #   max_plane_nPix[0] = prong_vv[1].size()
+        
+      # plane2_nPix[0] = prong_vv[2].size()
+      # plane2_badpixels = 0
+      # for iP in range(prong_vv[2].size()):
+      #   pix = prong_vv[2].at(iP)
+      #   plane2pix_row[iP] = pix.row
+      #   plane2pix_col[iP] = pix.col
+      #   plane2pix_val[iP] = pix.val
+      #   if pix.col<0 or pix.row<0 or pix.col>=args.pixelWH or pix.row>=args.pixelWH:
+      #     plane2_badpixels += 1
+      # if prong_vv[2].size() > max_plane_nPix[0]:
+      #   max_plane_nPix[0] = prong_vv[2].size()
+
+      # if plane0_badpixels>0 or plane1_badpixels>0 or plane2_badpixels>0:
+      #   raise ValueError(f"Bad pixels in prong image: {plane0_badpixels}, {plane1_badpixels}, {plane2_badpixels}") 
+        
+      # raw_plane0_nPix[0] = prong
+      # for pix in prong_vv[3]:
+      #   raw_plane0pix_row[iP] = pix.row
+      #   raw_plane0pix_col[iP] = pix.col
+      #   raw_plane0pix_val[iP] = pix.val
+      #   iP += 1
+      # raw_plane0_nPix[0] = iP
+      # iP = 0
+      # for pix in prong_vv[4]:
+      #   raw_plane1pix_row[iP] = pix.row
+      #   raw_plane1pix_col[iP] = pix.col
+      #   raw_plane1pix_val[iP] = pix.val
+      #   iP += 1
+      # raw_plane1_nPix[0] = iP
+      # iP = 0
+      # for pix in prong_vv[5]:
+      #   raw_plane2pix_row[iP] = pix.row
+      #   raw_plane2pix_col[iP] = pix.col
+      #   raw_plane2pix_val[iP] = pix.val
+      #   iP += 1
+      # raw_plane2_nPix[0] = iP
         
       imageTree.Fill()
     #++++++ end track loop +++++++++++++++++++++++++++++++++++++++++++++++++++=
@@ -568,12 +623,17 @@ for filepair in filepairs:
       prong_vv = flowTriples.make_cropped_initial_sparse_prong_image_reco(adc_v, thrumu_v, 
                   nuVertex.shower_v[iS], cropPt, args.pixelThresh, args.pixelWH, args.pixelWH)
       skip = False
+      nplanes = 0      
       for p in range(3):
-        if prong_vv[p].size() < args.minPixelCount:
-          skip = True
-          break
+        if prong_vv[p].size() >= args.minPixelCount:
+          nplanes += 1
+      if nplanes<args.minGoodPlanes:
+        skip = True
+        
       if skip:
         continue
+
+      print(f"Make Shower Prong Image Index[{iS}] Num Good Planes={nplanes} ==============")
 
       #pdg[0], purity[0], pdglist, puritylist = getMCProngParticle(prong_vv, mcpm)
       pdg[0], processClass[0], trackId, truePixSum, purity[0], completeness[0], pdglist, puritylist = getMCProngParticle(prong_vv, mcpg, mcpm, adc_v)
@@ -581,6 +641,10 @@ for filepair in filepairs:
       if truePixSum > 0.:
         bestOtherComp[0] = getBestOtherCompleteness(vertices, vertex[0], -1, iS,
          flowTriples, adc_v, thrumu_v, mcpm, trackId, truePixSum)
+
+      print("  Purity: ",purity[0])
+      print("  Completeness: ",completeness[0])
+      print("  PDG: ",pdg[0])
 
       nParticles[0] = len(pdglist)
       for iTP in range(len(pdglist)):
@@ -593,54 +657,84 @@ for filepair in filepairs:
 
       trueEnergy[0], trueTheta[0], trueEdgeDist[0] = getTruePartInfo(ioll, trackId, pdg[0])
 
-      iP = 0
-      for pix in prong_vv[0]:
-        plane0pix_row[iP] = pix.row
-        plane0pix_col[iP] = pix.col
-        plane0pix_val[iP] = pix.val
-        iP += 1
-      plane0_nPix[0] = iP
-      max_plane_nPix[0] = iP
-      iP = 0
-      for pix in prong_vv[1]:
-        plane1pix_row[iP] = pix.row
-        plane1pix_col[iP] = pix.col
-        plane1pix_val[iP] = pix.val
-        iP += 1
-      plane1_nPix[0] = iP
-      if iP > max_plane_nPix[0]:
-        max_plane_nPix[0] = iP
-      iP = 0
-      for pix in prong_vv[2]:
-        plane2pix_row[iP] = pix.row
-        plane2pix_col[iP] = pix.col
-        plane2pix_val[iP] = pix.val
-        iP += 1
-      plane2_nPix[0] = iP
-      if iP > max_plane_nPix[0]:
-        max_plane_nPix[0] = iP
+      max_plane_nPix[0] = 0
+      image_vars = [
+        [plane0pix_row,plane0pix_col,plane0pix_val,array('i',[0]),plane0_nPix],
+        [plane1pix_row,plane1pix_col,plane1pix_val,array('i',[0]),plane1_nPix],
+        [plane2pix_row,plane2pix_col,plane2pix_val,array('i',[0]),plane2_nPix],
+        [raw_plane0pix_row,raw_plane0pix_col,raw_plane0pix_val,array('i',[0]),raw_plane0_nPix],
+        [raw_plane1pix_row,raw_plane1pix_col,raw_plane1pix_val,array('i',[0]),raw_plane1_nPix],
+        [raw_plane2pix_row,raw_plane2pix_col,raw_plane2pix_val,array('i',[0]),raw_plane2_nPix]
+      ]
+      num_good_planes[0] = nplanes
+      
+      for iplane, (planeXpix_row, planeXpix_col, planeXpix_val, nbad, planeX_nPix) in enumerate(image_vars):
+        planeX_nPix[0] = prong_vv[iplane].size()
+        nbad[0] = 0
+        print(f"  Shower ProngImage[{iplane}] npixels=%d"%(planeX_nPix[0]))
+        for iP in range(prong_vv[iplane].size()):
+          pix = prong_vv[iplane].at(iP)
+          planeXpix_row[iP] = pix.row
+          planeXpix_col[iP] = pix.col
+          planeXpix_val[iP] = pix.val
+          if pix.col<0 or pix.row<0 or pix.col>=args.pixelWH or pix.row>=args.pixelWH:
+            nbad[0] += 1
+            
+        if nbad[0]>0:
+          raise ValueError(f"  prong_vv[{iplane}] has bad pixels. nbad=%d"%(nbad[0]))
         
-      iP = 0
-      for pix in prong_vv[3]:
-        raw_plane0pix_row[iP] = pix.row
-        raw_plane0pix_col[iP] = pix.col
-        raw_plane0pix_val[iP] = pix.val
-        iP += 1
-      raw_plane0_nPix[0] = iP
-      iP = 0
-      for pix in prong_vv[4]:
-        raw_plane1pix_row[iP] = pix.row
-        raw_plane1pix_col[iP] = pix.col
-        raw_plane1pix_val[iP] = pix.val
-        iP += 1
-      raw_plane1_nPix[0] = iP
-      iP = 0
-      for pix in prong_vv[5]:
-        raw_plane2pix_row[iP] = pix.row
-        raw_plane2pix_col[iP] = pix.col
-        raw_plane2pix_val[iP] = pix.val
-        iP += 1
-      raw_plane2_nPix[0] = iP
+        if iplane<3 and planeX_nPix[0]>max_plane_nPix[0]:    
+          max_plane_nPix[0] = planeX_nPix[0]
+      
+
+      # iP = 0
+      # for pix in prong_vv[0]:
+      #   plane0pix_row[iP] = pix.row
+      #   plane0pix_col[iP] = pix.col
+      #   plane0pix_val[iP] = pix.val
+      #   iP += 1
+      # plane0_nPix[0] = iP
+      # max_plane_nPix[0] = iP
+      # iP = 0
+      # for pix in prong_vv[1]:
+      #   plane1pix_row[iP] = pix.row
+      #   plane1pix_col[iP] = pix.col
+      #   plane1pix_val[iP] = pix.val
+      #   iP += 1
+      # plane1_nPix[0] = iP
+      # if iP > max_plane_nPix[0]:
+      #   max_plane_nPix[0] = iP
+      # iP = 0
+      # for pix in prong_vv[2]:
+      #   plane2pix_row[iP] = pix.row
+      #   plane2pix_col[iP] = pix.col
+      #   plane2pix_val[iP] = pix.val
+      #   iP += 1
+      # plane2_nPix[0] = iP
+      # if iP > max_plane_nPix[0]:
+      #   max_plane_nPix[0] = iP
+        
+      # iP = 0
+      # for pix in prong_vv[3]:
+      #   raw_plane0pix_row[iP] = pix.row
+      #   raw_plane0pix_col[iP] = pix.col
+      #   raw_plane0pix_val[iP] = pix.val
+      #   iP += 1
+      # raw_plane0_nPix[0] = iP
+      # iP = 0
+      # for pix in prong_vv[4]:
+      #   raw_plane1pix_row[iP] = pix.row
+      #   raw_plane1pix_col[iP] = pix.col
+      #   raw_plane1pix_val[iP] = pix.val
+      #   iP += 1
+      # raw_plane1_nPix[0] = iP
+      # iP = 0
+      # for pix in prong_vv[5]:
+      #   raw_plane2pix_row[iP] = pix.row
+      #   raw_plane2pix_col[iP] = pix.col
+      #   raw_plane2pix_val[iP] = pix.val
+      #   iP += 1
+      # raw_plane2_nPix[0] = iP
         
       imageTree.Fill()
     #++++++ end shower loop +++++++++++++++++++++++++++++++++++++++++++++++++++=
