@@ -174,6 +174,7 @@ if args.plane2only:
         model = nn.DataParallel(model)
 
 else:
+    print("CREATING DATA LOADERS")
     img_mean = mean
     img_std = std
     if args.noMask:

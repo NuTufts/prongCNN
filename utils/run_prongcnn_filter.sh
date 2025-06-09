@@ -63,7 +63,7 @@ for ((i=0;i<${STRIDE};i++)); do
     filteredname=`echo ${outname} | sed 's|\.root|\_cleaned\_minHit10\_noSecondaries\.root|g'`
     echo ${filteredname}
     
-    CMD="python3 ${SCRIPTNAME} -f ${outname}"
+    CMD="python3 ${SCRIPTNAME} -l -f ${outname}"
     echo $CMD
     $CMD
 

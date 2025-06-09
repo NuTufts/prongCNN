@@ -6,16 +6,41 @@ import random
 
 parser = argparse.ArgumentParser("Split Prong CNN Training File into Train/Test Samples")
 parser.add_argument("-f", "--infile", required=True, type=str, help="prongCNN images root file")
+parser.add_argument("-l", "--islist", action="store_true", default=False, help="If given, treat input as textfile with many events")
 parser.add_argument("-nV", "--nVal", type=int, default=2000, help="number of particles per class to write to validation file")
 args = parser.parse_args()
 
-f_orig = rt.TFile(args.infile)
-t_orig = f_orig.Get("ImageTree")
+#f_orig = rt.TFile(args.infile)
+#t_orig = f_orig.Get("ImageTree")
 
-f_train = rt.TFile(args.infile.replace(".root","_%iPerClassVal_train.root"%args.nVal), "RECREATE")
+t_orig = rt.TChain("ImageTree")
+if not args.islist:
+  t_orig.Add( args.infile )
+  suffix = "root"
+else:
+  print("Loading inputlist: ",args.infile)
+  suffix = "txt"
+  with open(args.infile,"r") as finput:
+    ll = finput.readlines()
+    numfiles = len(ll)
+    ifile = 0
+    for l in ll:
+      l = l.strip()
+      if not os.path.exists(l):
+        raise ValueError("Could not load this file")
+      if ifile>0 and ifile%10000==0:
+        print(f"adding file [{ifile}] of {numfiles}")
+      t_orig.Add(l)
+      ifile += 1
+      
+NENTRIES=t_orig.GetEntries()
+print("Number of entries in TChain: ",NENTRIES)
+
+
+f_train = rt.TFile(args.infile.replace(suffix,"_%iPerClassVal_train.root"%args.nVal), "RECREATE")
 t_train = t_orig.CloneTree(0)
 
-f_test = rt.TFile(args.infile.replace(".root","_%iPerClassVal_test.root"%args.nVal), "RECREATE")
+f_test = rt.TFile(args.infile.replace(suffix,"_%iPerClassVal_test.root"%args.nVal), "RECREATE")
 t_test = t_orig.CloneTree(0)
 
 
@@ -64,4 +89,4 @@ f_test.cd()
 t_test.Write("",rt.TObject.kOverwrite)
 f_test.Close()
 
-f_orig.Close()
+#f_orig.Close()

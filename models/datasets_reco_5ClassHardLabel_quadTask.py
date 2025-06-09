@@ -44,9 +44,20 @@ class ProngDataset(Dataset):
         self.procClasses = np.array([arrays["processClass"][i] for i in range(len(arrays["processClass"]))])
         self.transforms = transformations
         self.clipVal = clip
+        self.keys = [
+          "pdg",
+          "completeness",
+          "purity",
+          "processClass",
+          "plane0pix_row", "plane0pix_col", "plane0pix_val",
+          "plane1pix_row", "plane1pix_col", "plane1pix_val",
+          "plane2pix_row", "plane2pix_col", "plane2pix_val",
+          "raw_plane0pix_row", "raw_plane0pix_col", "raw_plane0pix_val",
+          "raw_plane1pix_row", "raw_plane1pix_col", "raw_plane1pix_val",
+          "raw_plane2pix_row", "raw_plane2pix_col", "raw_plane2pix_val"]
     
     def __getitem__(self, item):
-        #print("retrieving ProngDataset entry", item)
+        print("retrieving ProngDataset entry", item)
         tree = uproot.open(self.filename)["ImageTree"]
         image = np.zeros((6,512,512))
         
@@ -58,6 +69,10 @@ class ProngDataset(Dataset):
                               "raw_plane1pix_row", "raw_plane1pix_col", "raw_plane1pix_val",
                               "raw_plane2pix_row", "raw_plane2pix_col", "raw_plane2pix_val"],
                              library="np", entry_start=item, entry_stop=item+1)
+        # for debug
+        for k in self.keys:
+          print(k,": ",arrays[k].shape)
+        
         image[0, arrays["plane0pix_row"][0], arrays["plane0pix_col"][0]] = arrays["plane0pix_val"][0]
         image[2, arrays["plane1pix_row"][0], arrays["plane1pix_col"][0]] = arrays["plane1pix_val"][0]
         image[4, arrays["plane2pix_row"][0], arrays["plane2pix_col"][0]] = arrays["plane2pix_val"][0]
