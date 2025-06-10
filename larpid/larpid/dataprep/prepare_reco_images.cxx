@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <getopt.h>
+#include <set>
 
 // ROOT includes
 #include "TChain.h"
@@ -31,6 +32,43 @@ PrepareRecoImages::PrepareRecoImages()
     fSparseRawRow.resize(3);
     fSparseRawCol.resize(3);
     fSparseRawADC.resize(3);
+
+    // build PDG code -> electric charge map (matching Python chargeDict)
+    _chargeDict.clear();
+    _chargeDict[22] = 0;       // photon
+    _chargeDict[11] = -1;      // electron
+    _chargeDict[-11] = 1;      // positron
+    _chargeDict[13] = -1;      // muon
+    _chargeDict[-13] = 1;      // antimuon
+    _chargeDict[15] = -1;      // tau
+    _chargeDict[-15] = 1;      // antitau
+    _chargeDict[12] = 0;       // electron neutrino
+    _chargeDict[-12] = 0;      // electron antineutrino
+    _chargeDict[14] = 0;       // muon neutrino
+    _chargeDict[-14] = 0;      // muon antineutrino
+    _chargeDict[16] = 0;       // tau neutrino
+    _chargeDict[-16] = 0;      // tau antineutrino
+    _chargeDict[211] = 1;      // pi+
+    _chargeDict[-211] = -1;    // pi-
+    _chargeDict[111] = 0;      // pi0
+    _chargeDict[3122] = 0;     // lambda0
+    _chargeDict[-3122] = 0;    // antilambda0
+    _chargeDict[321] = 1;      // K+
+    _chargeDict[-321] = -1;    // K-
+    _chargeDict[310] = 0;      // K0S
+    _chargeDict[130] = 0;      // K0L
+    _chargeDict[3112] = -1;    // sigma-
+    _chargeDict[3222] = 1;     // sigma+
+    _chargeDict[-3112] = 1;    // antisigma-
+    _chargeDict[-3222] = -1;   // antisigma+
+    _chargeDict[3322] = 0;     // xi0
+    _chargeDict[-3322] = 0;    // antixi0
+    _chargeDict[3312] = -1;    // xi-
+    _chargeDict[-3312] = 1;    // antixi-
+    _chargeDict[2212] = 1;     // proton
+    _chargeDict[-2212] = -1;   // antiproton
+    _chargeDict[2112] = 0;     // neutron
+    _chargeDict[-2112] = 0;    // antineutron
 }
 
 PrepareRecoImages::~PrepareRecoImages() {
@@ -147,12 +185,18 @@ void PrepareRecoImages::setupOutputTree() {
     // Truth info branches
     fOutTree->Branch("pdg", &fPDG, "pdg/I");
     fOutTree->Branch("process_class", &fProcessClass, "process_class/I");
+    fOutTree->Branch("track_id", &fTrackID, "track_id/I");
+    fOutTree->Branch("total_true_pixI", &fTotalTruePixI, "total_true_pixI/F");
     fOutTree->Branch("purity", &fPurity, "purity/F");
     fOutTree->Branch("completeness", &fCompleteness, "completeness/F");
     fOutTree->Branch("best_other_completeness", &fBestOtherCompleteness, "best_other_completeness/F");
     fOutTree->Branch("energy", &fEnergy, "energy/F");
     fOutTree->Branch("angle", &fAngle, "angle/F");
     fOutTree->Branch("min_edge_dist", &fMinEdgeDist, "min_edge_dist/F");
+    fOutTree->Branch("pdg_list", &fPDGList);
+    fOutTree->Branch("purity_list", &fPurityList);
+    fOutTree->Branch("isShower", &fIsShower, "isShower/I");
+    fOutTree->Branch("isSecondary", &fIsSecondary, "isSecondary/I");
     
     // Sparse image branches for each plane
     for (int p = 0; p < 3; p++) {
@@ -174,7 +218,8 @@ void PrepareRecoImages::fillOutputTree(const MCProngInfo& info,
                                       const std::vector<std::vector<int>>& sparseRawCols,
                                       const std::vector<std::vector<float>>& sparseRawADCs,
                                       int run, int subrun, int event,
-                                      int vtxid, int clusterid) {
+                                      int vtxid, int clusterid,
+                                      int isShower, int isSecondary) {
     // Fill event info
     fRun = run;
     fSubrun = subrun;
@@ -185,12 +230,18 @@ void PrepareRecoImages::fillOutputTree(const MCProngInfo& info,
     // Fill truth info
     fPDG = info.pdgCode;
     fProcessClass = info.processClass;
+    fTrackID = info.trackID;
+    fTotalTruePixI = info.totalTruePixI;
     fPurity = info.purity;
     fCompleteness = info.completeness;
     fBestOtherCompleteness = info.bestOtherCompleteness;
     fEnergy = info.energy;
     fAngle = info.angle;
     fMinEdgeDist = info.minEdgeDist;
+    fPDGList = info.pdgList;
+    fPurityList = info.purityList;
+    fIsShower = isShower;
+    fIsSecondary = isSecondary;
     
     // Fill sparse image data
     for (int p = 0; p < 3; p++) {
@@ -545,43 +596,146 @@ void PrepareRecoImages::process() {
                     continue;
                 }
                 
-                // Create list of all prong pixels for completeness calculation
-                std::vector<std::vector<int>> allProngPixels;
-                // For this track, we only have one set of pixels, but we need it in the expected format
-                allProngPixels.resize(3);
-                for (int p = 0; p < 3; p++) {
-                    allProngPixels[p] = sparseRows[p]; // Using row indices as simple pixel identifiers
-                }
                 
-                // Perform MC truth matching
+                // Use ADC images already declared above for completeness calculation
+                
+                // Perform MC truth matching (matching Python function signature)
                 MCProngInfo mcInfo = getMCProngParticle(
-                    sparseRows[0],        // Prong pixel data for first plane
-                    allProngPixels,       // All prong pixels for this vertex
+                    prong_vv,             // Sparse prong image data (CropPixData_t format)
                     mcpg,                 // MC pixel graph
                     mcpm,                 // MC pixel map
+                    adc_v,                // ADC images for completeness calculation
                     *ev_mctrack,          // MC track collection
                     *ev_mcshower,         // MC shower collection
-                    0,                    // Use first plane for truth matching
-                    vtxTVec3              // Vertex position
+                    0,                    // Plane (for bestOtherCompleteness)
+                    vtxTVec3              // Vertex position (for edge distance)
                 );
                 
                 mcInfo.minEdgeDist = getMinEdgeDist(cropPt);
+                
+                // Calculate best other completeness if we have a valid match
+                if (mcInfo.totalTruePixI > 0.0) {
+                    mcInfo.bestOtherCompleteness = getBestOtherCompleteness(
+                        nuvertex_v, 0, iT, -1,  // vID=0 (current vertex), tID=iT, sID=-1 (not a shower)
+                        flowTriples, adc_v, thrumu_v, mcpm, 
+                        mcInfo.trackID, mcInfo.totalTruePixI);
+                }
                                 
                 // Fill output tree
+                int isTrackSecondary = (iT < nuVertex->track_isSecondary_v.size()) ? 
+                                       nuVertex->track_isSecondary_v[iT] : 0;
                 fillOutputTree(mcInfo, sparseRows, sparseCols, sparseADCs,
                               sparseRawRows, sparseRawCols, sparseRawADCs,
-                              run, subrun, event, 0, iT);
+                              run, subrun, event, 0, iT,
+                              0, isTrackSecondary);  // 0 for isShower (this is a track)
                 
                 std::cout << "Successfully processed track " << iT << std::endl;
             }
             
-            // TODO: Process showers  
+            // Process showers  
             std::cout << "Number of showers: " << nuVertex->shower_v.size() << std::endl;
             for (size_t iS = 0; iS < nuVertex->shower_v.size(); iS++) {
-                // Add shower processing logic here
-                // Use FlowTriples to create cropped images
-                // Apply MC truth matching
+                const auto& shower = nuVertex->shower_v[iS];
+                
+                // Check shower quality - basic check since we don't have a goodShower equivalent
+                if (shower.size() == 0) {
+                    std::cout << "Shower " << iS << " has no hits" << std::endl;
+                    continue;
+                }
+                
+                // Get crop point (shower trunk vertex)
+                if (iS >= nuVertex->shower_trunk_v.size()) {
+                    std::cout << "No shower trunk for shower " << iS << std::endl;
+                    continue;
+                }
+                TVector3 cropPt(nuVertex->shower_trunk_v[iS].Vertex().X(),
+                               nuVertex->shower_trunk_v[iS].Vertex().Y(),
+                               nuVertex->shower_trunk_v[iS].Vertex().Z());
+                
+                std::cout << "Processing shower " << iS << " with vertex point (" 
+                         << cropPt.X() << ", " << cropPt.Y() << ", " << cropPt.Z() << ")" << std::endl;
+                
+                // Get ADC and thrumu images from larcv
+                auto ev_adc = (larcv::EventImage2D*)io_larcv.get_data(larcv::kProductImage2D, "wire");
+                auto ev_thrumu = (larcv::EventImage2D*)io_larcv.get_data(larcv::kProductImage2D, "thrumu");
+                
+                if (!ev_adc || !ev_thrumu) {
+                    std::cout << "Could not get image data for shower " << iS << std::endl;
+                    continue;
+                }
+                
+                const auto& adc_v = ev_adc->Image2DArray();
+                const auto& thrumu_v = ev_thrumu->Image2DArray();
+                
+                if (adc_v.size() < 3 || thrumu_v.size() < 3) {
+                    std::cout << "Insufficient image planes for shower " << iS << std::endl;
+                    continue;
+                }
+                
+                // Generate cropped prong image using FlowTriples
+                auto prong_vv = flowTriples.make_cropped_initial_sparse_prong_image_reco(
+                    adc_v,                           // ADC images for 3 planes
+                    thrumu_v,                        // Threshold muon images for 3 planes
+                    shower,                          // Hit cluster for this shower
+                    cropPt,                          // Crop center point (shower vertex)
+                    fConfig.pixelThreshold,          // Pixel threshold (default: 10.0)
+                    fConfig.imageSize,               // Image width (default: 512)
+                    fConfig.imageSize                // Image height (default: 512)
+                );
+                
+                // Check pixel counts and plane requirements
+                if (!checkPixelCounts(prong_vv)) {
+                    std::cout << "Shower " << iS << " failed pixel count requirements" << std::endl;
+                    continue;
+                }
+                
+                // Extract sparse image data
+                std::vector<std::vector<int>> sparseRows(3), sparseCols(3), sparseRawRows(3), sparseRawCols(3);
+                std::vector<std::vector<float>> sparseADCs(3), sparseRawADCs(3);
+                extractSparseImage(prong_vv,
+                                   sparseRows,    sparseCols,    sparseADCs,
+                                   sparseRawRows, sparseRawCols, sparseRawADCs);
+                
+                // Get MC truth data for truth matching
+                auto ev_mctrack = (larlite::event_mctrack*)io_truth.get_data(larlite::data::kMCTrack, "mcreco");
+                auto ev_mcshower = (larlite::event_mcshower*)io_truth.get_data(larlite::data::kMCShower, "mcreco");
+                
+                if (!ev_mctrack || !ev_mcshower) {
+                    std::cout << "Could not get MC truth data for shower " << iS << std::endl;
+                    continue;
+                }
+                                
+                // Perform MC truth matching
+                MCProngInfo mcInfo = getMCProngParticle(
+                    prong_vv,             // Sparse prong image data (CropPixData_t format)
+                    mcpg,                 // MC pixel graph
+                    mcpm,                 // MC pixel map
+                    adc_v,                // ADC images for completeness calculation
+                    *ev_mctrack,          // MC track collection
+                    *ev_mcshower,         // MC shower collection
+                    0,                    // Plane (for bestOtherCompleteness)
+                    vtxTVec3              // Vertex position (for edge distance)
+                );
+                
+                mcInfo.minEdgeDist = getMinEdgeDist(cropPt);
+                
+                // Calculate best other completeness if we have a valid match
+                if (mcInfo.totalTruePixI > 0.0) {
+                    mcInfo.bestOtherCompleteness = getBestOtherCompleteness(
+                        nuvertex_v, 0, -1, iS,  // vID=0 (current vertex), tID=-1 (not a track), sID=iS
+                        flowTriples, adc_v, thrumu_v, mcpm, 
+                        mcInfo.trackID, mcInfo.totalTruePixI);
+                }
+                
                 // Fill output tree
+                int isShowerSecondary = (iS < nuVertex->shower_isSecondary_v.size()) ?
+                                       nuVertex->shower_isSecondary_v[iS] : 0;
+                fillOutputTree(mcInfo, sparseRows, sparseCols, sparseADCs,
+                              sparseRawRows, sparseRawCols, sparseRawADCs,
+                              run, subrun, event, 0, iS,
+                              1, isShowerSecondary);  // 1 for isShower
+                
+                std::cout << "Successfully processed shower " << iS << std::endl;
             }
             
             nprocessed++;
@@ -607,10 +761,10 @@ void PrepareRecoImages::process() {
 // These need to be fully implemented based on the Python logic
 
 PrepareRecoImages::MCProngInfo PrepareRecoImages::getMCProngParticle(
-    const std::vector<int>& prongPixels,
-    const std::vector<std::vector<int>>& allProngPixels,
-    ublarcvapp::mctools::MCPixelPGraph& pgraph,
-    ublarcvapp::mctools::MCPixelPMap& pmap,
+    const std::vector<std::vector<larflow::prep::CropPixData_t>>& sparseimg_vv,
+    ublarcvapp::mctools::MCPixelPGraph& mcpg,
+    ublarcvapp::mctools::MCPixelPMap& mcpm,
+    const std::vector<larcv::Image2D>& adc_v,
     const larlite::event_mctrack& mctrack_v,
     const larlite::event_mcshower& mcshower_v,
     int plane,
@@ -618,117 +772,149 @@ PrepareRecoImages::MCProngInfo PrepareRecoImages::getMCProngParticle(
     
     MCProngInfo info;
     
-    // Initialize particle and track dictionaries for accumulating pixel contributions
-    std::map<int, float> particleDict;  // PDG -> accumulated ADC
-    std::map<int, std::vector<float>> trackDict;  // trackID -> [PDG, nodeIndex, accumulated ADC]
+    // Initialize data structures exactly like Python version
+    std::map<int, float> particleDict;  // PDG -> accumulated pixel intensity
+    std::map<int, std::vector<float>> trackDict;  // trackID -> [PDG, nodeIndex, accumulated pixI]
+    float totalPixI = 0.0;  // Total pixel intensity across all pixels
     
-    float totalPixI = 0.0;  // Total ADC in reconstructed prong
-    
-    // For truth matching, we need to access the prong pixel data
-    // This is a simplified implementation - in the full version we'd iterate through
-    // the actual sparse prong image data with raw coordinates
-    
-    // Loop through planes for pixel-level truth matching
-    for (int p = 0; p < 3; p++) {
-        if (allProngPixels.size() <= p) continue;
+    // Loop through sparse prong image data exactly like Python version
+    for (int p = 0; p < 3; p++) {  // Loop over 3 wire planes (U, V, Y)
+        if (p >= sparseimg_vv.size()) continue;
         
-        // In a full implementation, we would loop through the actual sparse prong pixels
-        // For now, create a simplified version that demonstrates the logic
-        for (int pixIdx = 0; pixIdx < std::min((int)allProngPixels[p].size(), 100); pixIdx++) {
-            // In the real implementation, we would have:
-            // - pixel.rawRow, pixel.rawCol from the CropPixData_t
-            // - pixel.val for ADC value
+        int npixels = sparseimg_vv[p].size();  // Number of pixels in this plane
+        for (int ipix = 0; ipix < npixels; ipix++) {  // Loop over each pixel
+            const auto& pix = sparseimg_vv[p][ipix];  // Get pixel object
             
-            // Simplified: assume we have row/col coordinates
-            int rawRow = pixIdx % fConfig.imageSize;  // Simplified coordinate
-            int rawCol = pixIdx / fConfig.imageSize;  // Simplified coordinate  
-            float pixelADC = 10.0;  // Simplified ADC value
+            // Access pixel coordinates and values exactly like Python
+            int rawRow = pix.rawRow;
+            int rawCol = pix.rawCol;
+            float pixVal = pix.val;
             
-            totalPixI += pixelADC;
+            totalPixI += pixVal;  // Accumulate total intensity
             
             // Get MC truth content for this pixel
-            auto pixContents = pmap.getPixContent(p, rawRow, rawCol);
+            auto pixContents = mcpm.getPixContent(p, rawRow, rawCol);
             
-            // Simplified implementation - the actual data structure access needs to be
-            // determined from the MCPixelPMap header files
-            // For now, use a basic implementation that will compile
-            
-            // Create a dummy track ID and contribution for demonstration
-            int trackID = 1;  // Simplified
-            float contribution = pixelADC * 0.8;  // Simplified
-            
-            // Find the particle node in the graph
-            auto node = pgraph.findTrackID(trackID);
-            if (node) {
-                int pdg = node->pid;
-                
-                // Accumulate by PDG type
-                particleDict[pdg] += contribution;
-                
-                // Accumulate by track ID
-                if (trackDict.find(trackID) == trackDict.end()) {
-                    trackDict[trackID] = std::vector<float>{(float)pdg, (float)node->tid, 0.0};
+            // Loop through particles exactly like Python version:
+            // for part in pixContents.particles:
+            for (const auto& part : pixContents.particles) {
+                // Accumulate by PDG (particle type) - Python logic:
+                // if abs(part.pdg) in particleDict:
+                //     particleDict[abs(part.pdg)] += pixContents.pixI
+                // else:
+                //     particleDict[abs(part.pdg)] = pixContents.pixI
+                int absPDG = abs(part.pdg);
+                if (particleDict.find(absPDG) != particleDict.end()) {
+                    particleDict[absPDG] += pixContents.pixI;
+                } else {
+                    particleDict[absPDG] = pixContents.pixI;
                 }
-                trackDict[trackID][2] += contribution;
+                
+                // Track individual particle tracks - Python logic:
+                // if part.tid in trackDict:
+                //     trackDict[part.tid][2] += pixContents.pixI
+                // else:
+                //     trackDict[part.tid] = [part.pdg, part.nodeidx, pixContents.pixI]
+                if (trackDict.find(part.tid) != trackDict.end()) {
+                    trackDict[part.tid][2] += pixContents.pixI;  // Accumulate intensity
+                } else {
+                    trackDict[part.tid] = std::vector<float>{(float)part.pdg, (float)part.nodeidx, pixContents.pixI};
+                }
             }
         }
     }
     
-    // Find dominant particle (track with maximum ADC contribution)
-    int maxPartTID = -1;
+    // Find dominant particle exactly like Python version
     int maxPartPDG = 0;
-    int maxPartNID = -1;
-    float maxPartI = 0.0;
+    int maxPartNID = -1;        // Node ID
+    int maxPartTID = -1;        // Track ID
+    int maxPartProcClass = -1;  // Process class
+    float maxPartI = 0.0;       // Max intensity
+    float maxPartComp = 0.0;    // Completeness
     
+    // Find track with maximum intensity
     for (const auto& track : trackDict) {
         if (track.second[2] > maxPartI) {
-            maxPartI = track.second[2];
-            maxPartPDG = (int)track.second[0];
-            maxPartNID = (int)track.second[1];
-            maxPartTID = track.first;
+            maxPartI = track.second[2];           // Intensity
+            maxPartPDG = (int)track.second[0];    // PDG
+            maxPartNID = (int)track.second[1];    // Node index
+            maxPartTID = track.first;             // Track ID
         }
     }
     
-    // Calculate purity and completeness
-    info.purity = (totalPixI > 0) ? maxPartI / totalPixI : 0.0;
-    
-    // For completeness, we need to find total true ADC from the dominant particle
+    // Calculate completeness exactly like Python version
     float totNodePixI = 0.0;
-    if (maxPartTID >= 0) {
-        auto maxPartNode = pgraph.findTrackID(maxPartTID);
+    if (maxPartI > 0.0) {
+        auto maxPartNode = mcpg.findTrackID(maxPartTID);
         if (maxPartNode) {
-            // In a full implementation, we would sum over all pixels in the true particle's node
-            // For now, use a simplified calculation
-            totNodePixI = maxPartI / 0.5;  // Assume 50% completeness as default
-        }
-    }
-    info.completeness = (totNodePixI > 0) ? maxPartI / totNodePixI : 0.0;
-    
-    // Calculate best other completeness (simplified)
-    info.bestOtherCompleteness = getBestOtherCompleteness(
-        allProngPixels, pgraph, pmap, plane, maxPartTID, 0);
-    
-    // Determine process classification (simplified)
-    info.processClass = 0;  // Default to primary
-    if (maxPartTID >= 0) {
-        auto maxPartNode = pgraph.findTrackID(maxPartTID);
-        if (maxPartNode) {
-            // Simplified classification based on PDG codes
-            // This would need to be expanded with proper parent-child relationships
-            if (abs(maxPartPDG) == 11 || abs(maxPartPDG) == 13) {
-                info.processClass = 0;  // Leptons tend to be primary
-            } else if (abs(maxPartPDG) == 22) {
-                info.processClass = 1;  // Photons are secondary neutral
-            } else {
-                info.processClass = 2;  // Other particles as secondary charged
+            // Build set of all track IDs in the graph (Python: nodeTIDs)
+            std::set<int> nodeTIDs;
+            for (const auto& node : mcpg.node_v) {
+                nodeTIDs.insert(node.tid);
             }
-        }
+            
+            // Process classification exactly like Python version
+            if (maxPartNode->process == "primary") {
+                maxPartProcClass = 0;
+            } else if (nodeTIDs.find(maxPartNode->mtid) == nodeTIDs.end()) {
+                // Mother track ID not in node list
+                maxPartProcClass = 1;
+            } else if (_chargeDict.find(maxPartNode->mother->pid) == _chargeDict.end()) {
+                // Mother PDG not in charge dictionary
+                maxPartProcClass = 1;
+            } else if (_chargeDict[maxPartNode->mother->pid] == 0) {
+                // Mother has neutral charge
+                maxPartProcClass = 1;
+            } else if (abs(_chargeDict[maxPartNode->mother->pid]) == 1) {
+                // Mother has unit charge
+                maxPartProcClass = 2;
+            } else {
+                // Shouldn't happen unless there's a mistake
+                maxPartProcClass = -1;
+            }
+            
+            // Calculate true pixel intensity for this particle
+	    for (int p=0; p<3; p++) {
+	      auto& pixels = maxPartNode->pix_vv[p];
+	      for (size_t iP=0; iP<pixels.size()/2; iP++) {
+		int row = ( pixels.at(2*iP)-2400 )/6;
+		int col = pixels.at(2*iP+1);
+		totNodePixI += adc_v.at(p).pixel(row, col);
+	      }
+	    }
+
+	    if ( totNodePixI > 0.0 ) {
+	      maxPartComp = maxPartI/totNodePixI; // Completeness = reco/true
+	    }
+	}//end of if maxNode found
+    }//end of if maxPartI>0.0
+
+    if ( maxPartComp>1.0 ) {
+      throw std::runtime_error( "ERROR: prong completeness calculated to be >1");
     }
     
-    // Set particle info
-    info.pdgCode = maxPartPDG;
+    // Build PDG and purity lists exactly like Python version
+    std::vector<int> pdglist;
+    std::vector<float> puritylist;
+    for (const auto& part : particleDict) {
+        pdglist.push_back(part.first);
+        puritylist.push_back(part.second / totalPixI);  // Fraction of total intensity
+    }
     
-    // Calculate energy and angle (simplified)
+    // Fill MCProngInfo struct with all values from Python return
+    info.pdgCode = maxPartPDG;
+    info.processClass = maxPartProcClass;
+    info.trackID = maxPartTID;
+    info.totalTruePixI = totNodePixI;
+    info.purity = (totalPixI > 0) ? maxPartI / totalPixI : 0.0;
+    info.completeness = maxPartComp;
+    info.pdgList = pdglist;
+    info.purityList = puritylist;
+    
+    // Best other completeness will be calculated separately in the main loop
+    info.bestOtherCompleteness = 0.0;
+    
+    // Calculate energy and angle from MC truth
     info.energy = 0.0;
     info.angle = 0.0;
     if (maxPartTID >= 0) {
@@ -737,7 +923,6 @@ PrepareRecoImages::MCProngInfo PrepareRecoImages::getMCProngParticle(
             if (mctrack.TrackID() == maxPartTID) {
                 if (mctrack.size() > 0) {
                     info.energy = mctrack[0].E();  // Initial energy
-                    // Calculate angle with respect to vertex
                     TVector3 trackDir(mctrack[0].Px(), mctrack[0].Py(), mctrack[0].Pz());
                     info.angle = trackDir.Theta();
                 }
@@ -762,73 +947,107 @@ PrepareRecoImages::MCProngInfo PrepareRecoImages::getMCProngParticle(
 }
 
 float PrepareRecoImages::checkCompleteness(
-    const std::vector<int>& prongPixels,
-    ublarcvapp::mctools::MCPixelPGraph& pgraph,
-    ublarcvapp::mctools::MCPixelPMap& pmap,
-    int plane,
-    int trackid) {
+    larflow::prep::FlowTriples& flowTriples,
+    const std::vector<larcv::Image2D>& adc_v,
+    const std::vector<larcv::Image2D>& thrumu_v,
+    const larlite::larflowcluster& prongCluster,
+    const TVector3& cropPt,
+    ublarcvapp::mctools::MCPixelPMap& mcpm,
+    int mcTID,
+    float truePixSum,
+    float bestComp) {
     
-    if (trackid < 0) return 0.0;
+    // Make cropped prong image exactly like Python version
+    auto prong_vv = flowTriples.make_cropped_initial_sparse_prong_image_reco(
+        adc_v, thrumu_v, prongCluster, cropPt, 
+        fConfig.pixelThreshold, fConfig.imageSize, fConfig.imageSize);
     
-    // Find the particle node for this track ID
-    auto node = pgraph.findTrackID(trackid);
-    if (!node) return 0.0;
+    float matchedSum = 0.0;
     
-    // Calculate ADC found in this prong for this particle
-    float foundADC = 0.0;
-    
-    // Simplified implementation - in reality we would loop through actual pixel coordinates
-    for (int pixIdx = 0; pixIdx < std::min((int)prongPixels.size(), 100); pixIdx++) {
-        // Simplified coordinates
-        int rawRow = pixIdx % fConfig.imageSize;
-        int rawCol = pixIdx / fConfig.imageSize;
+    // Loop through all 3 planes
+    for (int p = 0; p < 3; p++) {
+        if (p >= prong_vv.size()) continue;
         
-        // Get MC truth content for this pixel
-        auto pixContents = pmap.getPixContent(plane, rawRow, rawCol);
+        const auto& prong_v = prong_vv[p];
         
-        // Simplified implementation - check if track matches
-        // In the actual implementation, we would parse pixContents properly
-        if (trackid == 1) {  // Simplified matching
-            foundADC += 5.0;  // Simplified contribution
+        // Loop through all pixels in this plane
+        for (size_t ipix = 0; ipix < prong_v.size(); ipix++) {
+            const auto& pix = prong_v.at(ipix);
+            
+            // Get MC truth content for this pixel
+            auto pixContents = mcpm.getPixContent(p, pix.rawRow, pix.rawCol);
+            
+            // Check if this pixel contains the particle we're looking for
+            for (const auto& part : pixContents.particles) {
+                if (part.tid == mcTID) {
+                    matchedSum += pixContents.pixI;
+                }
+            }
         }
     }
     
-    // Calculate total true ADC for this particle (simplified)
-    // In reality, we would sum over all pixels in the particle's node
-    float totalTrueADC = foundADC / 0.5;  // Assume we typically capture 50%
+    // Calculate completeness
+    float comp = (truePixSum > 0) ? matchedSum / truePixSum : 0.0;
     
-    // Return completeness
-    return (totalTrueADC > 0) ? foundADC / totalTrueADC : 0.0;
+    // Return the better of the two completeness values
+    return (comp > bestComp) ? comp : bestComp;
 }
 
 float PrepareRecoImages::getBestOtherCompleteness(
-    const std::vector<std::vector<int>>& allProngPixels,
-    ublarcvapp::mctools::MCPixelPGraph& pgraph,
-    ublarcvapp::mctools::MCPixelPMap& pmap,
-    int plane,
-    int trackid,
-    int excludeProngIdx) {
+    const std::vector<larflow::reco::NuVertexCandidate>* vertices,
+    int vID, int tID, int sID,
+    larflow::prep::FlowTriples& flowTriples,
+    const std::vector<larcv::Image2D>& adc_v,
+    const std::vector<larcv::Image2D>& thrumu_v,
+    ublarcvapp::mctools::MCPixelPMap& mcpm,
+    int mcTID,
+    float truePartPixSum) {
     
-    if (trackid < 0) return 0.0;
+    float bestComp = 0.0;
     
-    float bestCompleteness = 0.0;
-    
-    // Loop through all other prongs (excluding the current one)
-    for (int prongIdx = 0; prongIdx < allProngPixels.size(); prongIdx++) {
-        if (prongIdx == excludeProngIdx) continue;  // Skip the current prong
+    // Loop through all vertices
+    for (size_t iV = 0; iV < vertices->size(); iV++) {
+        const auto& vertex = (*vertices)[iV];
         
-        if (plane >= allProngPixels[prongIdx].size()) continue;
+        // Loop through all tracks in this vertex
+        for (size_t iT = 0; iT < vertex.track_hitcluster_v.size(); iT++) {
+            // Skip if this is the current track we're checking against
+            if (iV == vID && iT == tID) continue;
+            
+            // Check track quality
+            if (!goodTrack(vertex.track_v[iT])) continue;
+            
+            // Get crop point (track end)
+            TVector3 cropPt(vertex.track_v[iT].End().X(),
+                           vertex.track_v[iT].End().Y(),
+                           vertex.track_v[iT].End().Z());
+            
+            // Check completeness for this track
+            bestComp = checkCompleteness(flowTriples, adc_v, thrumu_v,
+                                       vertex.track_hitcluster_v[iT], cropPt,
+                                       mcpm, mcTID, truePartPixSum, bestComp);
+        }
         
-        // Calculate completeness for this particle in this other prong
-        float completeness = checkCompleteness(
-            allProngPixels[prongIdx], pgraph, pmap, plane, trackid);
-        
-        if (completeness > bestCompleteness) {
-            bestCompleteness = completeness;
+        // Loop through all showers in this vertex
+        for (size_t iS = 0; iS < vertex.shower_v.size(); iS++) {
+            // Skip if this is the current shower we're checking against
+            if (iV == vID && iS == sID) continue;
+            
+            // Get crop point (shower trunk vertex)
+            if (iS >= vertex.shower_trunk_v.size()) continue;
+            
+            TVector3 cropPt(vertex.shower_trunk_v[iS].Vertex().X(),
+                           vertex.shower_trunk_v[iS].Vertex().Y(),
+                           vertex.shower_trunk_v[iS].Vertex().Z());
+            
+            // Check completeness for this shower
+            bestComp = checkCompleteness(flowTriples, adc_v, thrumu_v,
+                                       vertex.shower_v[iS], cropPt,
+                                       mcpm, mcTID, truePartPixSum, bestComp);
         }
     }
     
-    return bestCompleteness;
+    return bestComp;
 }
 
 } // namespace dataprep

@@ -112,38 +112,48 @@ namespace dataprep {
     struct MCProngInfo {
       int pdgCode;
       int processClass;  // 0=primary, 1=secondary neutral parent, 2=secondary charged parent
+      int trackID;       // maxPartTID
+      float totalTruePixI;  // totNodePixI
       float purity;
       float completeness;
       float bestOtherCompleteness;
       float energy;
       float angle;
       float minEdgeDist;
+      std::vector<int> pdgList;      // List of all PDG codes found
+      std::vector<float> purityList; // List of purities for each PDG
     };
     
     MCProngInfo getMCProngParticle(
-        const std::vector<int>& prongPixels,
-        const std::vector<std::vector<int>>& allProngPixels,
-        ublarcvapp::mctools::MCPixelPGraph& pgraph,
-        ublarcvapp::mctools::MCPixelPMap& pmap,
+        const std::vector<std::vector<larflow::prep::CropPixData_t>>& sparseimg_vv,
+        ublarcvapp::mctools::MCPixelPGraph& mcpg,
+        ublarcvapp::mctools::MCPixelPMap& mcpm,
+        const std::vector<larcv::Image2D>& adc_v,
         const larlite::event_mctrack& mctrack_v,
         const larlite::event_mcshower& mcshower_v,
         int plane,
         const TVector3& vtx3d);
     
     float checkCompleteness(
-        const std::vector<int>& prongPixels,
-        ublarcvapp::mctools::MCPixelPGraph& pgraph,
-        ublarcvapp::mctools::MCPixelPMap& pmap,
-        int plane,
-        int trackid);
+        larflow::prep::FlowTriples& flowTriples,
+        const std::vector<larcv::Image2D>& adc_v,
+        const std::vector<larcv::Image2D>& thrumu_v,
+        const larlite::larflowcluster& prongCluster,
+        const TVector3& cropPt,
+        ublarcvapp::mctools::MCPixelPMap& mcpm,
+        int mcTID,
+        float truePixSum,
+        float bestComp);
     
     float getBestOtherCompleteness(
-        const std::vector<std::vector<int>>& allProngPixels,
-        ublarcvapp::mctools::MCPixelPGraph& pgraph,
-        ublarcvapp::mctools::MCPixelPMap& pmap,
-        int plane,
-        int trackid,
-        int excludeProngIdx);
+        const std::vector<larflow::reco::NuVertexCandidate>* vertices,
+        int vID, int tID, int sID,
+        larflow::prep::FlowTriples& flowTriples,
+        const std::vector<larcv::Image2D>& adc_v,
+        const std::vector<larcv::Image2D>& thrumu_v,
+        ublarcvapp::mctools::MCPixelPMap& mcpm,
+        int mcTID,
+        float truePartPixSum);
     
     // Geometry functions
     bool isFiducial(const TVector3& vtx, 
@@ -162,11 +172,13 @@ namespace dataprep {
                        const std::vector<std::vector<int>>& sparseRawCols,
                        const std::vector<std::vector<float>>& sparseRawADCs,
                        int run, int subrun, int event,
-                       int vtxid, int clusterid);
+                       int vtxid, int clusterid,
+                       int isShower, int isSecondary);
     
     // Member variables
     Config fConfig;
     larutil::SpaceChargeMicroBooNE fSCE;
+    std::map<int,int> _chargeDict;
     
     // Output file and tree
     TFile* fOutFile;
@@ -174,9 +186,13 @@ namespace dataprep {
     
     // Output tree variables
     int fRun, fSubrun, fEvent, fVtxID, fClusterID;
-    int fPDG, fProcessClass;
-    float fPurity, fCompleteness, fBestOtherCompleteness;
+    int fPDG, fProcessClass, fTrackID;
+    float fTotalTruePixI, fPurity, fCompleteness, fBestOtherCompleteness;
     float fEnergy, fAngle, fMinEdgeDist;
+    std::vector<int> fPDGList;
+    std::vector<float> fPurityList;
+    int fIsShower;
+    int fIsSecondary;
     
     // Sparse image storage (for each plane)
     std::vector<std::vector<int>> fSparseRow;
