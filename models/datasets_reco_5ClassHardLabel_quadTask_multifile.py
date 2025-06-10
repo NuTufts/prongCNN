@@ -123,35 +123,6 @@ class ProngDatasetMultiFile(Dataset):
         
         return file_idx, local_idx
     
-    def _get_tree(self, file_path):
-        """
-        Get tree from file, using cache if available.
-        Thread-safe for multiprocessing.
-        """
-        # with self._cache_lock:
-        #     if file_path in self._file_cache:
-        #         # Move to end (LRU)
-        #         self._cache_order.remove(file_path)
-        #         self._cache_order.append(file_path)
-        #         return self._file_cache[file_path]
-            
-        #     # Need to open file
-        #     if len(self._file_cache) >= self.cache_size:
-        #         # Evict least recently used
-        #         oldest = self._cache_order.pop(0)
-        #         del self._file_cache[oldest]
-            
-        #     # Open new file
-        #     tree = uproot.open(file_path)["ImageTree"]
-        #     self._file_cache[file_path] = tree
-        #     self._cache_order.append(file_path)
-            
-        #     return tree
-
-        tree = uproot.open(file_path)["ImageTree"]
-        return tree
-        
-    
     def __getitem__(self, item):
         """
         Get a single example by global index.
@@ -185,23 +156,23 @@ class ProngDatasetMultiFile(Dataset):
         # Fill image channels
         # Channels 0, 2, 4: prong pixels for planes 0, 1, 2
         # Channels 1, 3, 5: context (raw) pixels for planes 0, 1, 2
-        # if self.debug:
-        #     for k in self.keys:
-        #         print(k,": ",arrays[k][0].shape)
+        if self.debug:
+            for k in self.keys:
+                print(k,": ",arrays[k][0].shape)
 
-        # try:
-        #     image[0, arrays["plane0pix_row"][0], arrays["plane0pix_col"][0]] = arrays["plane0pix_val"][0]
-        #     image[2, arrays["plane1pix_row"][0], arrays["plane1pix_col"][0]] = arrays["plane1pix_val"][0]
-        #     image[4, arrays["plane2pix_row"][0], arrays["plane2pix_col"][0]] = arrays["plane2pix_val"][0]
-        #     image[1, arrays["raw_plane0pix_row"][0], arrays["raw_plane0pix_col"][0]] = arrays["raw_plane0pix_val"][0]
-        #     image[3, arrays["raw_plane1pix_row"][0], arrays["raw_plane1pix_col"][0]] = arrays["raw_plane1pix_val"][0]
-        #     image[5, arrays["raw_plane2pix_row"][0], arrays["raw_plane2pix_col"][0]] = arrays["raw_plane2pix_val"][0]
-        # except Exception:
-        #     print("Error loading the image arrays")
-        #     print(traceback.format_exc())
-        #     print("file loaded: ",file_path)
-        #     print("file index, local index: ",(file_idx,local_idx))
-        #     raise ValueError("Error loading the image arrays")
+        try:
+            image[0, arrays["plane0pix_row"][0], arrays["plane0pix_col"][0]] = arrays["plane0pix_val"][0]
+            image[2, arrays["plane1pix_row"][0], arrays["plane1pix_col"][0]] = arrays["plane1pix_val"][0]
+            image[4, arrays["plane2pix_row"][0], arrays["plane2pix_col"][0]] = arrays["plane2pix_val"][0]
+            image[1, arrays["raw_plane0pix_row"][0], arrays["raw_plane0pix_col"][0]] = arrays["raw_plane0pix_val"][0]
+            image[3, arrays["raw_plane1pix_row"][0], arrays["raw_plane1pix_col"][0]] = arrays["raw_plane1pix_val"][0]
+            image[5, arrays["raw_plane2pix_row"][0], arrays["raw_plane2pix_col"][0]] = arrays["raw_plane2pix_val"][0]
+        except Exception:
+            print("Error loading the image arrays")
+            print(traceback.format_exc())
+            print("file loaded: ",file_path)
+            print("file index, local index: ",(file_idx,local_idx))
+            raise ValueError("Error loading the image arrays")
         
         # Convert to torch tensor
         image = torch.from_numpy(image).float()
@@ -213,7 +184,6 @@ class ProngDatasetMultiFile(Dataset):
             arrays["purity"][0], 
             arrays["processClass"][0]
         ]
-        #target = [0,0.0,0.0,0] # for testing
         
         # Apply transforms if any
         if self.transforms is not None:
