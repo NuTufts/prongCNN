@@ -532,25 +532,35 @@ for filepair in filepairs:
         [raw_plane1pix_row,raw_plane1pix_col,raw_plane1pix_val,array('i',[0]),raw_plane1_nPix],
         [raw_plane2pix_row,raw_plane2pix_col,raw_plane2pix_val,array('i',[0]),raw_plane2_nPix]
       ]
-      num_good_planes[0] = nplanes
+      num_good_planes[0] = 0
 
       for iplane, (planeXpix_row, planeXpix_col, planeXpix_val, nbad, planeX_nPix) in enumerate(image_vars):
-        planeX_nPix[0] = prong_vv[iplane].size()
+        planeX_nPix[0] = 0
         nbad[0] = 0
-        print(f"  Track ProngImage[{iplane}] npixels=%d"%(planeX_nPix[0]))
         for iP in range(prong_vv[iplane].size()):
           pix = prong_vv[iplane].at(iP)
-          planeXpix_row[iP] = pix.row
-          planeXpix_col[iP] = pix.col
-          planeXpix_val[iP] = pix.val
           if pix.col<0 or pix.row<0 or pix.col>=args.pixelWH or pix.row>=args.pixelWH:
             nbad[0] += 1
+            #print(f"  badpixel: plane={iplane} pixel=({pix.row},{pix.col},{pix.rawRow},{pix.rawCol}) incrop={pix.inCrop}")
+          else:
+            idx = planeX_nPix[0]
+            planeXpix_row[idx] = pix.row
+            planeXpix_col[idx] = pix.col
+            planeXpix_val[idx] = pix.val            
+            planeX_nPix[0] += 1
             
-        if nbad[0]>0:
-          raise ValueError(f"  prong_vv[{iplane}] has bad pixels. nbad=%d"%(nbad[0]))
+        print(f"  Track ProngImage[{iplane}] npixels=%d (out-of-crop=%d)"%(planeX_nPix[0],nbad[0]))
+        if iplane<3 and planeX_nPix[0]>=args.minPixelCount:
+          num_good_planes[0] += 1
+          
+        #if nbad[0]>0:
+        #  raise ValueError(f"  prong_vv[{iplane}] has bad pixels. nbad=%d"%(nbad[0]))
         
         if iplane<3 and planeX_nPix[0]>max_plane_nPix[0]:    
           max_plane_nPix[0] = planeX_nPix[0]
+
+      if num_good_planes[0]<args.minGoodPlanes:
+        continue
           
       # replaced below with a proper loop
       # plane0_nPix[0] = prong_vv[0].size()
@@ -666,26 +676,35 @@ for filepair in filepairs:
         [raw_plane1pix_row,raw_plane1pix_col,raw_plane1pix_val,array('i',[0]),raw_plane1_nPix],
         [raw_plane2pix_row,raw_plane2pix_col,raw_plane2pix_val,array('i',[0]),raw_plane2_nPix]
       ]
-      num_good_planes[0] = nplanes
+      num_good_planes[0] = 0
       
       for iplane, (planeXpix_row, planeXpix_col, planeXpix_val, nbad, planeX_nPix) in enumerate(image_vars):
-        planeX_nPix[0] = prong_vv[iplane].size()
+        planeX_nPix[0] = 0
         nbad[0] = 0
-        print(f"  Shower ProngImage[{iplane}] npixels=%d"%(planeX_nPix[0]))
         for iP in range(prong_vv[iplane].size()):
           pix = prong_vv[iplane].at(iP)
-          planeXpix_row[iP] = pix.row
-          planeXpix_col[iP] = pix.col
-          planeXpix_val[iP] = pix.val
           if pix.col<0 or pix.row<0 or pix.col>=args.pixelWH or pix.row>=args.pixelWH:
             nbad[0] += 1
+          else:
+            idx = planeX_nPix[0]
+            planeXpix_row[idx] = pix.row
+            planeXpix_col[idx] = pix.col
+            planeXpix_val[idx] = pix.val            
+            planeX_nPix[0] += 1
             
-        if nbad[0]>0:
-          raise ValueError(f"  prong_vv[{iplane}] has bad pixels. nbad=%d"%(nbad[0]))
+            
+        #if nbad[0]>0:
+        #  raise ValueError(f"  prong_vv[{iplane}] has bad pixels. nbad=%d"%(nbad[0]))
+
+        print(f"  Shower ProngImage[{iplane}] npixels=%d (out-of-crop=%d)"%(planeX_nPix[0],nbad[0]))
+        if iplane<3 and planeX_nPix[0]>=args.minPixelCount:
+          num_good_planes[0] += 1
         
         if iplane<3 and planeX_nPix[0]>max_plane_nPix[0]:    
           max_plane_nPix[0] = planeX_nPix[0]
-      
+
+      if num_good_planes[0]<args.minGoodPlanes:
+        continue
 
       # iP = 0
       # for pix in prong_vv[0]:
