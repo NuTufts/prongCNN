@@ -59,6 +59,12 @@ find_package( larcv REQUIRED )
 set( larlite_DIR "$ENV{LARLITE_LIBDIR}/cmake/larlite" )
 find_package( larlite REQUIRED )
 
+set( ublarcvapp_DIR "$ENV{UBLARCVAPP_LIBDIR}/cmake/ublarcvapp" )
+find_package( ublarcvapp REQUIRED )
+
+set( larflow_DIR "$ENV{LARFLOW_LIBDIR}/cmake/larflow" )
+find_package( larflow REQUIRED )
+
 # --- Torch
 if (ON_FNAL)
   # For FNAL
