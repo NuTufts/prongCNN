@@ -4,7 +4,7 @@
 #SBATCH --job-name=prongcnndata
 #SBATCH --mem-per-cpu=8000
 #SBATCH --time=2-0:00:00
-#SBATCH --array=0-199
+#SBATCH --array=0-10
 #SBATCH --cpus-per-task=2
 #SBATCH --partition=batch
 ##SBATCH --partition=wongjiradlab
