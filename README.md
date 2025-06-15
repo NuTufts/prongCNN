@@ -15,6 +15,9 @@ To get the current best-performing configurations, use:
 * The ProngDataset class (inherits from torch.utils.data.Dataset) from models/datasets_reco_5ClassHardLabel_quadTask.py  
 * The ResNet34 class (inherits from torch.nn.Module) from models/models_instanceNorm_reco_2chan_quadTask.py
 
+TODO list:
+* Provide interface function that receives IOManager and makes sparse image where one can choose to not veto shower-like prongs
+
 ## Preprocessing
 
 When training/evaluating the network, I use the following three scripts for preprocessing:  
