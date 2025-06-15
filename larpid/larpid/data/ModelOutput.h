@@ -1,11 +1,10 @@
-#ifndef __LARPID_INTERFACE_MODELOUTPUT_H__
-#define __LARPID_INTERFACE_MODELOUTPUT_H__
+#ifndef __LARPID_DATA_MODELOUTPUT_H__
+#define __LARPID_DATA_MODELOUTPUT_H__
 
 #include <vector>
-#include <string>
 
 namespace larpid {
-namespace interface {
+namespace data {
 
   class ModelOutput {
   public:

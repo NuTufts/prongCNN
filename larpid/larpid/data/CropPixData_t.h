@@ -1,21 +1,14 @@
-#ifndef __LARPID_INTERFACE_CROP_PIX_DATA_T_H__
-#define __LARPID_INTERFACE_CROP_PIX_DATA_T_H__
+#ifndef __LARPID_DATA_CROP_PIX_DATA_T_H__
+#define __LARPID_DATA_CROP_PIX_DATA_T_H__
 
 #include <cmath>
 
 namespace larpid {
-namespace interface {
+namespace data {
 
-  struct CropPixData_t {
+  class CropPixData_t {
 
-    int row; ///< row of pixel in cropped image
-    int col; ///< col of pixel in cropped image
-    int rawRow; ///< row of pixel in original image
-    int rawCol; ///< col of pixel in original image
-    float val; ///< value of pixel
-    float adc; ///< ADC value (alias for val)
-    bool inCrop; ///< pixel is inside crop
-    int idx;   ///< index in container
+  public:
     
     CropPixData_t()
     : row(0),col(0),rawRow(0),rawCol(0),val(0.0),adc(0.0),inCrop(false),idx(0)
@@ -40,6 +33,15 @@ namespace interface {
       return false;
     };
     
+    int row; ///< row of pixel in cropped image
+    int col; ///< col of pixel in cropped image
+    int rawRow; ///< row of pixel in original image
+    int rawCol; ///< col of pixel in original image
+    float val; ///< value of pixel
+    float adc; ///< ADC value (alias for val)
+    bool inCrop; ///< pixel is inside crop
+    int idx;   ///< index in container
+
   };
 
 }

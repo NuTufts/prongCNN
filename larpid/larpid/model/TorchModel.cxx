@@ -3,7 +3,7 @@
 #include <stdexcept>
 
 namespace larpid {
-namespace interface {
+namespace model {
 
 TorchModel::TorchModel() : debug_mode(false) {
     // Default constructor - model must be initialized later
@@ -64,8 +64,10 @@ void TorchModel::printTensorValues(const torch::Tensor& tensor) {
     std::cout << "Tensor values: " << tensor << std::endl;
 }
 
-ModelOutput TorchModel::run_inference(const std::vector<std::vector<CropPixData_t>>& pixelData) {
-    ModelOutput output;
+larpid::data::ModelOutput 
+TorchModel::run_inference(const std::vector<std::vector<larpid::data::CropPixData_t>>& pixelData) {
+    
+    larpid::data::ModelOutput output;
     
     try {
         // Create input tensor (1, 6, 512, 512)

@@ -1,7 +1,7 @@
 #include "ModelOutput.h"
 
 namespace larpid {
-namespace interface {
+namespace data {
 
 ModelOutput::ModelOutput() {
     reset();
@@ -18,5 +18,5 @@ void ModelOutput::reset() {
     purity = 0.0;
 }
 
-} // namespace interface
+} // namespace data
 } // namespace larpid

@@ -7,8 +7,7 @@
 namespace larpid {
 namespace interface {
 
-
-  std::vector< std::vector<CropPixData_t> >
+  std::vector< std::vector<larpid::data::CropPixData_t> >
   make_cropped_initial_sparse_prong_image_reco( const std::vector<larcv::Image2D>& adc_v,
                                                 const std::vector<larcv::Image2D>& thrumu_v,
                                                 const larlite::larflowcluster& prong,
@@ -16,7 +15,7 @@ namespace interface {
                                                 float threshold, int rowSpan, int colSpan ) {
 
     // sparsify planes: pixels must be above threshold
-    std::vector< std::vector<CropPixData_t> > sparseimg_vv(adc_v.size()*2);
+    std::vector< std::vector<larpid::data::CropPixData_t> > sparseimg_vv(adc_v.size()*2);
     for ( size_t p=0; p<adc_v.size(); p++ ) {
       sparseimg_vv[p].reserve( (int)( 0.1 * adc_v[p].as_vector().size() ) ); 
       sparseimg_vv[p+3].reserve( (int)( 0.1 * adc_v[p].as_vector().size() ) ); 
@@ -95,7 +94,7 @@ namespace interface {
   }
 
 
-  void fillProngImagesFromReco(std::vector< std::vector<CropPixData_t> >& sparseimg_vv,
+  void fillProngImagesFromReco(std::vector< std::vector<larpid::data::CropPixData_t> >& sparseimg_vv,
                                const float& threshold,
                                const std::vector<larcv::Image2D>& adc_v,
                                const std::vector<larcv::Image2D>& thrumu_v,
@@ -111,7 +110,7 @@ namespace interface {
         float val = adc_v[p].pixel(row, col);
         float val_cosmic = thrumu_v[p].pixel(row, col);
           if ( val >= threshold && val_cosmic < threshold ){
-            CropPixData_t cropPixData(row - imgBounds[p][0], col - imgBounds[p][2], row, col, val, true);
+            larpid::data::CropPixData_t cropPixData(row - imgBounds[p][0], col - imgBounds[p][2], row, col, val, true);
             if( std::find(sparseimg_vv[p].begin(), sparseimg_vv[p].end(), cropPixData) != sparseimg_vv[p].end() )
               continue;
             if ( row >= imgBounds[p][0] && row < imgBounds[p][1] &&
@@ -137,7 +136,7 @@ namespace interface {
   }
 
 
-  void fillContextImages(std::vector< std::vector<CropPixData_t> >& sparseimg_vv,
+  void fillContextImages(std::vector< std::vector<larpid::data::CropPixData_t> >& sparseimg_vv,
                          const float& threshold,
                          const std::vector<larcv::Image2D>& adc_v,
                          const std::vector<larcv::Image2D>& thrumu_v,
@@ -152,7 +151,7 @@ namespace interface {
           if ( val >= threshold && val_cosmic < threshold &&
                (int)row >= imgBounds[p][0] && (int)row < imgBounds[p][1] &&
                (int)col >= imgBounds[p][2] && (int)col < imgBounds[p][3] ) {
-            sparseimg_vv[p+3].push_back( CropPixData_t((int)row - imgBounds[p][0],
+            sparseimg_vv[p+3].push_back( larpid::data::CropPixData_t((int)row - imgBounds[p][0],
                                                        (int)col - imgBounds[p][2], (int)row, (int)col, val, true) );
           }
         }
