@@ -2,6 +2,9 @@
 #include <iostream>
 #include <stdexcept>
 
+#include <torch/torch.h>
+#include <c10/util/TypeIndex.h>
+
 namespace larpid {
 namespace model {
 
@@ -24,14 +27,30 @@ void TorchModel::Initialize(const std::string& model_path, const bool& debug) {
         
         // Initialize normalization parameters (from dataset mean/std)
         // These values should match those in datasets_reco_5ClassHardLabel_quadTask.py
-        float mean_vals[] = {0.5924, 0.5924, 0.5924, 0.5924, 0.5924, 0.5924};
-        float std_vals[] = {5.7890, 5.7890, 5.7890, 5.7890, 5.7890, 5.7890};
+        _mean_vals = std::vector<float>{0.5924, 0.5924, 0.5924, 0.5924, 0.5924, 0.5924};
+        _std_vals  = std::vector<float>{5.7890, 5.7890, 5.7890, 5.7890, 5.7890, 5.7890};
         
-        norm_mean = torch::from_blob(mean_vals, {6}, torch::kFloat32);
-        norm_std = torch::from_blob(std_vals, {6}, torch::kFloat32);
+        norm_mean = torch::from_blob(_mean_vals.data(), {1,6,1,1}, torch::kFloat32);
+        norm_std  = torch::from_blob(_std_vals.data(),  {1,6,1,1}, torch::kFloat32);
+
+        // auto options = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
+        // norm_mean = torch::zeros({1,6,1,1}, options);
+        // norm_std  = torch::zeros({1,6,1,1}, options);
+        // auto acc_norm_mean = norm_mean.accessor<float, 4>();
+        // auto acc_norm_std  = norm_std.accessor<float, 4>();
+        // for (int i=0; i<6; i++) {
+        //     acc_norm_mean[0][i][0][0] = _mean_vals[i];
+        //     acc_norm_std[0][i][0][0]  = _std_vals[i];
+        // }
         
         if (debug_mode) {
             std::cout << "Model loaded from: " << model_path << std::endl;
+
+            std::cout << "Made norm_mean tensor: " << std::endl;
+            printTensorValues( norm_mean );
+
+            std::cout << "Made norm_std tensor: " << std::endl;
+            printTensorValues( norm_std );
         }
     }
     catch (const c10::Error& e) {
@@ -77,60 +96,131 @@ TorchModel::run_inference(const std::vector<std::vector<larpid::data::CropPixDat
         for (size_t ch = 0; ch < pixelData.size() && ch < 6; ch++) {
             for (const auto& pix : pixelData[ch]) {
                 if (pix.row >= 0 && pix.row < 512 && pix.col >= 0 && pix.col < 512) {
+
+                    if ( std::isnan(pix.adc) || std::isinf(pix.adc) ) {
+                        std::cerr << "Bad pixel value "
+                                  << "@ [" << ch << ", " << pix.row << ", " << pix.col << "] "
+                                  << " pix.adc=" << pix.adc << std::endl;
+                        throw std::runtime_error("Bad input tensor pixel value");
+                    }
+
                     input[0][ch][pix.row][pix.col] = pix.adc;
                 }
             }
         }
         
+        torch::Tensor is_inf_prenorm_tensor = torch::isinf(input); 
+
+        if (is_inf_prenorm_tensor.any().item<bool>()) {
+            std::cerr << "Input tensor (pre-normalization) has inf values" << std::endl;
+            throw std::runtime_error("Input tensor (pre-normalized) has inf values");
+            return output;
+        }
+        else {
+            if ( debug_mode )
+                std::cout << "Prenorm tensor is good: does not have inf values" << std::endl;
+        }
+
+        if ( debug_mode ) {
+            std::cout << "View norm and std tensors" << std::endl;
+            printTensorValues( norm_mean.view({1, 6, 1, 1}) );
+            printTensorValues( norm_std.view({1, 6, 1, 1}) );
+        }
+
         // Normalize input
         input = (input - norm_mean.view({1, 6, 1, 1})) / norm_std.view({1, 6, 1, 1});
         
+        torch::Tensor is_inf_tensor = torch::isinf(input); 
+
+        if (is_inf_tensor.any().item<bool>()) {
+            std::cerr << "Input tensor (after normalization) has inf values" << std::endl;
+            throw std::runtime_error("Input tensor (after normalization) has inf values");
+            return output;
+        }
+        else {
+            if ( debug_mode )
+                std::cout << "Input tensor (after normalization) is good: no inf values" << std::endl;
+        }
+
         if (debug_mode) {
             std::cout << "Input tensor prepared" << std::endl;
-            printTensorValues(input);
+            //printTensorValues(input);
         }
-        
+
         // Run inference
         std::vector<torch::jit::IValue> inputs;
         inputs.push_back(input);
         
         auto model_output = model.forward(inputs);
+
+        if (debug_mode) {
+            std::cout << "model_output.tag()=" << model_output.tagKind() << std::endl;
+        }
         
         // Parse output based on quadTask model structure
-        if (model_output.isTuple()) {
-            auto outputs = model_output.toTuple()->elements();
-            
-            // Classification output
-            auto class_logits = outputs[0].toTensor();
-            auto class_probs = torch::softmax(class_logits, 1);
-            
-            // Convert to vector
-            auto class_probs_accessor = class_probs.accessor<float, 2>();
-            output.classScores.resize(5);
-            for (int i = 0; i < 5; i++) {
-                output.classScores[i] = class_probs_accessor[0][i];
-            }
-            output.predictedClass = torch::argmax(class_logits, 1).item<int>();
-            
-            // Process classification output
-            auto process_logits = outputs[1].toTensor();
-            auto process_probs = torch::softmax(process_logits, 1);
-            
-            auto process_probs_accessor = process_probs.accessor<float, 2>();
-            output.processScores.resize(3);
-            for (int i = 0; i < 3; i++) {
-                output.processScores[i] = process_probs_accessor[0][i];
-            }
-            output.predictedProcess = torch::argmax(process_logits, 1).item<int>();
-            
-            // Completeness regression
-            auto completeness_tensor = outputs[2].toTensor();
-            output.completeness = completeness_tensor[0][0].item<float>();
-            
-            // Purity regression
-            auto purity_tensor = outputs[3].toTensor();
-            output.purity = purity_tensor[0][0].item<float>();
+        torch::Tensor class_probs;
+        torch::Tensor process_probs;
+        torch::Tensor completeness_tensor;
+        torch::Tensor purity_tensor;
+
+        if ( model_output.isList() ) {
+            auto outputs = model_output.toList();
+            class_probs = outputs.get(0).toTensor();
+            completeness_tensor = outputs.get(1).toTensor();
+            purity_tensor = outputs.get(2).toTensor();
+            process_probs = outputs.get(3).toTensor();
         }
+        else if ( model_output.isTuple() ) {
+            auto outputs = model_output.toTuple()->elements();
+            class_probs = outputs[0].toTensor();
+            completeness_tensor = outputs[1].toTensor();
+            purity_tensor = outputs[2].toTensor();
+            process_probs = outputs[3].toTensor();
+        }
+        else {
+            std::stringstream ss;
+            ss << "Model output tag unknown: " << model_output.tagKind() << std::endl;
+            throw std::runtime_error(ss.str());
+        }
+        
+        if ( debug_mode) {
+            std::cout << "Class logits" << std::endl;
+            printTensorValues( class_probs );
+            std::cout << "Class probs (after softmax): " << std::endl;
+            printTensorValues( class_probs );
+            std::cout << "Completeness tensor:" << std::endl;
+            printTensorValues( completeness_tensor );
+            std::cout << "Purity tensor: " << std::endl;
+            printTensorValues( purity_tensor );
+            std::cout << "Process logits: " << std::endl;
+            printTensorValues( process_probs );
+        }
+        
+        // Convert to vector
+        if ( debug_mode ) std::cout << "store classification scores" << std::endl;
+        auto class_probs_accessor = class_probs.accessor<float, 2>();
+        output.classScores.resize(5);
+        for (int i = 0; i < 5; i++) {
+            output.classScores[i] = class_probs_accessor[0][i];
+        }
+        output.predictedClass = torch::argmax(class_probs, 1).item<int>();
+        
+        // Process classification output
+        if ( debug_mode ) std::cout << "store process scores" << std::endl;
+        auto process_probs_accessor = process_probs.accessor<float, 2>();
+        output.processScores.resize(3);
+        for (int i = 0; i < 3; i++) {
+            output.processScores[i] = process_probs_accessor[0][i];
+        }
+        output.predictedProcess = torch::argmax(process_probs, 1).item<int>();
+            
+        // Completeness regression
+        if ( debug_mode ) std::cout << "store completeness score" << std::endl;
+        output.completeness = completeness_tensor.item<float>();
+        
+        // Purity regression
+        if ( debug_mode ) std::cout << "store purity score" << std::endl;
+        output.purity = purity_tensor.item<float>();
         
         if (debug_mode) {
             std::cout << "Inference complete. Predicted class: " << output.predictedClass 

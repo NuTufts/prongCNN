@@ -85,6 +85,20 @@ set(TORCH_CUDA_ARCH_LIST "6.0;6.1;7.0;7.5;8.0;8.6")
 #set(TORCH_CUDA_ARCH_LIST "3.5;5.0;6.0;6.1;7.0;7.5;8.0;8.6;8.9;9.0")
 find_package( Torch REQUIRED )
 
+# Set up RPATH for executables to find PyTorch libraries
+set(CMAKE_SKIP_BUILD_RPATH FALSE)
+set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+
+# Get the directory containing PyTorch libraries
+get_target_property(TORCH_LIBRARY_DIR torch LOCATION)
+get_filename_component(TORCH_LIBRARY_DIR ${TORCH_LIBRARY_DIR} DIRECTORY)
+message(STATUS "PyTorch library directory: ${TORCH_LIBRARY_DIR}")
+
+# Set RPATH for installed executables
+list(APPEND CMAKE_INSTALL_RPATH ${TORCH_LIBRARY_DIR})
+list(APPEND CMAKE_INSTALL_RPATH ${CMAKE_INSTALL_PREFIX}/lib)
+
 # ## Git Submodules
 # find_package(Git QUIET)
 # if(GIT_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")

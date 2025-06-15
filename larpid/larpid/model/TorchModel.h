@@ -15,7 +15,8 @@ namespace model {
   class TorchModel {
 
   private:
-    torch::jit::Module model;
+    torch::jit::script::Module model;
+    //torch::jit::Module model;
     //torch::Device device;
     torch::Tensor norm_mean;
     torch::Tensor norm_std;
@@ -23,6 +24,9 @@ namespace model {
     int getPID(const int& cnnClass);
     size_t getChannel(const size_t& pixDataIndex);
     void printTensorValues(const torch::Tensor& tensor);
+
+    std::vector<float> _mean_vals;
+    std::vector<float> _std_vals;
 
   public:
     //TorchModel(const std::string& model_path, const bool& useGPU=false);
