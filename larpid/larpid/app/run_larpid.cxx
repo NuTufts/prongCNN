@@ -26,10 +26,11 @@ int main( int nargs, char** argv ) {
     std::cout << "kpsreco file: " << kpsreco_file << std::endl;
     std::cout << "model script file: " << model_script_file << std::endl;
 
-    bool debug = true;
+    bool debug = false;
     larpid::model::TorchModel model( model_script_file, debug );
  
     larcv::IOManager ioman( larcv::IOManager::kREAD, "ioman", larcv::IOManager::kTickBackward );
+    ioman.set_verbosity( larcv::msg::kINFO );
     ioman.add_in_file( merged_dlreco_file );
     ioman.reverse_all_products();
     ioman.initialize();
@@ -62,7 +63,7 @@ int main( int nargs, char** argv ) {
         auto& thrumu_v = ev_thrumu->as_vector();
 
         int nvertices = (int)(nuvetoed_v->size());
-        std::cout << "number of verticecs: " << nvertices << std::endl;
+        std::cout << "number of neutrino candidates: " << nvertices << std::endl;
 
         if ( nvertices==0 )
           continue;
@@ -72,6 +73,10 @@ int main( int nargs, char** argv ) {
 
             int ntracks  = nuvtx.track_v.size();
             int nshowers = nuvtx.shower_v.size();
+
+            std::cout << "NuCandidate[" << ivtx << "]" << std::endl;
+            std::cout << " ntracks=" << ntracks << std::endl;
+            std::cout << " nshowers=" << nshowers << std::endl;
 
             for (int itrack=0; itrack<ntracks; itrack++ ) {
 
@@ -96,15 +101,39 @@ int main( int nargs, char** argv ) {
                 if ( num_good_planes>=2 ) {
 
                     larpid::data::ModelOutput output = model.run_inference( prong_vv );
-                    std::cout << "Ran model" << std::endl;
+                    std::cout << "Ran model [track prong]: predicted PID = " << output.predictedPID << std::endl;
 
                 }
+            }
 
+            for (int ishower=0; ishower<nshowers; ishower++ ) {
 
+                auto& hitcluster = nuvtx.shower_v.at(ishower);
+                int npts = hitcluster.size();
+                larlite::track& shower_trunk = nuvtx.shower_trunk_v.at(ishower);
+                TVector3 startpt = shower_trunk.LocationAtPoint(0);
+        
+                std::vector< std::vector<larpid::data::CropPixData_t> > prong_vv
+                 = larpid::interface::make_cropped_initial_sparse_prong_image_reco( adc_v, 
+                     thrumu_v, hitcluster, startpt, 10.0, 512, 512 );
+
+                std::cout << "shower[" << ishower << "] npts=" << npts << std::endl;
+                int num_good_planes = 0;
+                for (int p=0; p<3; p++) {
+                    std::cout << "  prong[" << p << "]: " << prong_vv.at(p).size() << " pixels" << std::endl;
+                    if ( prong_vv.at(p).size()>=10 )
+                        num_good_planes += 1;
+                }
+
+                if ( num_good_planes>=2 ) {
+
+                    larpid::data::ModelOutput output = model.run_inference( prong_vv );
+                    std::cout << "Ran model [shower prong]: predicted PID = " << output.predictedPID << std::endl;
+
+                }
             }
         }
 
-        break;
     }
 
 

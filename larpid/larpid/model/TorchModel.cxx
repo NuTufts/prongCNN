@@ -204,6 +204,7 @@ TorchModel::run_inference(const std::vector<std::vector<larpid::data::CropPixDat
             output.classScores[i] = class_probs_accessor[0][i];
         }
         output.predictedClass = torch::argmax(class_probs, 1).item<int>();
+        output.predictedPID   = getPID( output.predictedClass );
         
         // Process classification output
         if ( debug_mode ) std::cout << "store process scores" << std::endl;
