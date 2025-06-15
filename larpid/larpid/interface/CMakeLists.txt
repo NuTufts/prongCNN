@@ -18,7 +18,8 @@ add_library( ${LIBNAME} SHARED
 # create a property to hold our headers
 set_target_properties(${LIBNAME} PROPERTIES PUBLIC_HEADER "${HEADERS}")
 
-message( STATUS "larcv ${LARCV_INCLUDE_DIR}")
+# for debug
+# message( STATUS "larcv ${LARCV_INCLUDE_DIR}")
 
 target_include_directories(${LIBNAME}
   PUBLIC
@@ -31,7 +32,9 @@ target_include_directories(${LIBNAME}
   ${PROJECT_SOURCE_DIR} 
 )
 
-message(STATUS "Torch include dirs: ${TORCH_INCLUDE_DIRS}")
+# for debug
+# message(STATUS "torch libraries: ${TORCH_LIBRARIES}")
+# message(STATUS "Torch include dirs: ${TORCH_INCLUDE_DIRS}")
 
 target_link_libraries(${LIBNAME} PUBLIC
   LArPID_Data
@@ -43,7 +46,8 @@ target_link_libraries(${LIBNAME} PUBLIC
   ${TORCH_LIBRARIES}
   ${ROOT_LIBRARIES}
 )
-message(STATUS "torch libraries: ${TORCH_LIBRARIES}")
+
+
 
 include_directories( ${CMAKE_CURRENT_SOURCE_DIR} 
   ${PROJECT_SOURCE_DIR} 

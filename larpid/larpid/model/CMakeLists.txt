@@ -23,13 +23,14 @@ target_include_directories(${LIBNAME}
   ${PROJECT_SOURCE_DIR} 
 )
 
-message(STATUS "Torch include dirs: ${TORCH_INCLUDE_DIRS}")
+# for debug
+#message(STATUS "Torch include dirs: ${TORCH_INCLUDE_DIRS}")
+#message(STATUS "torch libraries: ${TORCH_LIBRARIES}")
 
 target_link_libraries(${LIBNAME} PUBLIC
   LArPID_Data
   ${TORCH_LIBRARIES}
 )
-message(STATUS "torch libraries: ${TORCH_LIBRARIES}")
 
 include_directories( ${CMAKE_CURRENT_SOURCE_DIR} 
   ${PROJECT_SOURCE_DIR} 
