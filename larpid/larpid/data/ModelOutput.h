@@ -12,16 +12,17 @@ namespace data {
     ~ModelOutput();
     
     // Classification results
-    std::vector<float> classScores;
-    int predictedClass;
+    std::vector<float> classScores; // the logSoftmax is stored
+    int predictedClass; ///< predicted class CNN index
+    int predictedPID;   ///< PDG code of predicted class
     
     // Process classification results
-    std::vector<float> processScores;
+    std::vector<float> processScores; // the logSoftmax is stored
     int predictedProcess;
     
     // Regression results
-    float completeness;
-    float purity;
+    float completeness; // the output of sigmoid is stored
+    float purity;       // the output of sigmoid is stored
     
     // Reset all values
     void reset();

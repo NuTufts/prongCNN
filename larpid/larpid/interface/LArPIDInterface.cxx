@@ -30,6 +30,67 @@ namespace interface {
     return sparseimg_vv;
   }
 
+  std::vector< std::vector<larpid::data::CropPixData_t> >
+  make_prongCNN_input_sparse_images( larcv::IOManager& iolcv,
+                                     const larlite::larflowcluster& prong,
+                                     const TVector3& cropCenter, 
+                                     bool preserve_shower_pixels,
+                                     float threshold, int rowSpan, int colSpan,
+                                     std::string wireimg_treename,
+                                     std::string outoftime_treename )
+  {
+
+    auto ev_adc    = (larcv::EventImage2D*)iolcv.get_data( larcv::kProductImage2D, wireimg_treename );
+    auto ev_thrumu = (larcv::EventImage2D*)iolcv.get_data( larcv::kProductImage2D, outoftime_treename );
+
+    if ( !ev_adc || ev_adc->as_vector().size()!=3 ) {
+      throw std::runtime_error("Error getting wire plane images from the IOManager");
+    }
+    if ( !ev_thrumu || ev_thrumu->as_vector().size()!=3 ) {
+      throw std::runtime_error("Error getting out-of-time plane images from the IOManager");
+    }
+
+    const std::vector<larcv::Image2D>& adc_v = ev_adc->as_vector();
+    const std::vector<larcv::Image2D>& thrumu_v = ev_thrumu->as_vector();
+
+    std::vector< larcv::EventImage2D* > uresnet_v(3,0);
+    std::vector< const larcv::Image2D* > showerimg_v(3,0);
+    if ( preserve_shower_pixels ) {
+      for (int p=0; p<3; p++) {
+        std::stringstream uresnet_plane_name;
+        uresnet_plane_name << "ubspurn_plane" << p;
+        uresnet_v[p] = (larcv::EventImage2D*)iolcv.get_data( larcv::kProductImage2D, uresnet_plane_name.str() );
+        if  ( !uresnet_v[p] || uresnet_v[p]->as_vector().size()!=2 ) {
+          std::stringstream errmsg;
+          errmsg << "Error getting 2D UResNet track/shower results from " << uresnet_plane_name.str() << std::endl;
+          throw std::runtime_error(errmsg.str());
+        }
+        showerimg_v[p] = &(uresnet_v[p]->as_vector().at(1));
+      }
+    }
+
+    // sparsify planes: pixels must be above threshold
+    std::vector< std::vector<larpid::data::CropPixData_t> > sparseimg_vv(adc_v.size()*2);
+    for ( size_t p=0; p<adc_v.size(); p++ ) {
+      sparseimg_vv[p].reserve( (int)( 0.1 * adc_v[p].as_vector().size() ) ); 
+      sparseimg_vv[p+3].reserve( (int)( 0.1 * adc_v[p].as_vector().size() ) ); 
+    }
+
+    std::vector< std::vector<int> > imgBounds;
+    getRecoImageBounds(imgBounds, adc_v, prong, cropCenter, rowSpan, colSpan);
+
+    if ( !preserve_shower_pixels ) {
+      fillProngImagesFromReco(sparseimg_vv, threshold, adc_v, thrumu_v, prong, imgBounds);
+      fillContextImages(sparseimg_vv, threshold, adc_v, thrumu_v, imgBounds);
+    }
+    else {
+      fillProngImagesFromRecoAndKeepShowers(sparseimg_vv, threshold, adc_v, thrumu_v, showerimg_v, prong, imgBounds);
+      fillContextImages(sparseimg_vv, threshold, adc_v, thrumu_v, imgBounds);
+    }
+
+    return sparseimg_vv;
+  }
+
 
   void getRecoImageBounds( std::vector< std::vector<int> >& imgBounds,
                            const std::vector<larcv::Image2D>& adc_v,
@@ -135,6 +196,49 @@ namespace interface {
     return;
   }
 
+  void fillProngImagesFromRecoAndKeepShowers(std::vector< std::vector<larpid::data::CropPixData_t> >& sparseimg_vv,
+                               const float& threshold,
+                               const std::vector<larcv::Image2D>& adc_v,
+                               const std::vector<larcv::Image2D>& thrumu_v,
+                               const std::vector<const larcv::Image2D*>& showerimg_v,
+                               const larlite::larflowcluster& prong,
+                               const std::vector< std::vector<int> >& imgBounds) {
+
+    for ( size_t p=0; p<adc_v.size(); p++ ) {
+
+      for( const auto& hit : prong ){
+        // TO DO: REPLACE HARD-CODED VALUES!!!
+        int row = (hit.tick - 2400)/6;
+        int col = hit.targetwire[p];
+        float val = adc_v[p].pixel(row, col);
+        float val_cosmic = thrumu_v[p].pixel(row, col);
+        float shower_score = showerimg_v[p]->pixel(row,col);
+        if ( val >= threshold && (val_cosmic < threshold || shower_score>0.5) ) {
+          larpid::data::CropPixData_t cropPixData(row - imgBounds[p][0], col - imgBounds[p][2], row, col, val, true);
+          if( std::find(sparseimg_vv[p].begin(), sparseimg_vv[p].end(), cropPixData) != sparseimg_vv[p].end() )
+            continue;
+          if ( row >= imgBounds[p][0] && row < imgBounds[p][1] &&
+               col >= imgBounds[p][2] && col < imgBounds[p][3] ) {
+            sparseimg_vv[p].push_back(cropPixData);
+          }
+          else {
+            cropPixData.inCrop = false;
+            sparseimg_vv[p].push_back(cropPixData);
+          }
+        }
+      }
+
+      int idx=0;
+      for ( auto& pix : sparseimg_vv[p] ) {
+        pix.idx = idx;
+        idx++;
+      }
+
+    }
+
+    return;
+  }
+
 
   void fillContextImages(std::vector< std::vector<larpid::data::CropPixData_t> >& sparseimg_vv,
                          const float& threshold,
@@ -149,6 +253,39 @@ namespace interface {
           float val = adc_v[p].pixel(row,col);
           float val_cosmic = thrumu_v[p].pixel(row, col);
           if ( val >= threshold && val_cosmic < threshold &&
+               (int)row >= imgBounds[p][0] && (int)row < imgBounds[p][1] &&
+               (int)col >= imgBounds[p][2] && (int)col < imgBounds[p][3] ) {
+            sparseimg_vv[p+3].push_back( larpid::data::CropPixData_t((int)row - imgBounds[p][0],
+                                                       (int)col - imgBounds[p][2], (int)row, (int)col, val, true) );
+          }
+        }
+      }
+
+      int idx=0;
+      for ( auto& pix : sparseimg_vv[p+3] ) {
+        pix.idx = idx;
+        idx++;
+      }
+    }
+
+    return;
+  }
+
+  void fillContextImagesAndKeepImages(std::vector< std::vector<larpid::data::CropPixData_t> >& sparseimg_vv,
+                         const float& threshold,
+                         const std::vector<larcv::Image2D>& adc_v,
+                         const std::vector<larcv::Image2D>& thrumu_v,
+                         const std::vector<const larcv::Image2D*>& showerimg_v,
+                         const std::vector< std::vector<int> >& imgBounds){
+
+    for ( size_t p=0; p<adc_v.size(); p++ ) {
+
+      for ( size_t row=0; row<adc_v[p].meta().rows(); row++ ) {
+        for ( size_t col=0; col<adc_v[p].meta().cols(); col++ ) {
+          float val = adc_v[p].pixel(row,col);
+          float val_cosmic = thrumu_v[p].pixel(row, col);
+          float shower_score = showerimg_v[p]->pixel(row,col);
+          if ( val >= threshold && (val_cosmic < threshold || shower_score>0.5) &&
                (int)row >= imgBounds[p][0] && (int)row < imgBounds[p][1] &&
                (int)col >= imgBounds[p][2] && (int)col < imgBounds[p][3] ) {
             sparseimg_vv[p+3].push_back( larpid::data::CropPixData_t((int)row - imgBounds[p][0],

@@ -14,7 +14,7 @@
 #pragma link off all classes;
 #pragma link off all functions;
 
-#pragma link C++ class larpid::interface::LArPIDInterface.h+;
+//#pragma link C++ class larpid::interface::LArPIDInterface.h+;
 
 #endif
 
