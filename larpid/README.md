@@ -28,16 +28,38 @@ The interface provides access to prongCNN's four tasks:
 - **ublarcvapp**: For image processing utilities
 - **larflow**: For prong/cluster data structures
 
-Note: the version of LibTorch used must be built using the CXX-11 ABI standard. 
-(e.g. It must have been built with _GLIBCXX_USE_CXX11_ABI_=1. 
-Or ROOT and ubdl must be built with _GLIBCXX_USE_CXX11_ABI_=0).
-Copies of libtorch that come with pip typically are built with _GLIBCXX_USE_CXX11_ABI_=0.
+Note: the version of LibTorch used must be built using the C++11 ABI standard. 
+(e.g. It must have been built with `_GLIBCXX_USE_CXX11_ABI_=1` compiler flag. 
+Or ROOT and ubdl must be built with `_GLIBCXX_USE_CXX11_ABI_=0`).
+Copies of libtorch that come with pip typically are built with `_GLIBCXX_USE_CXX11_ABI_=0`.
 The easiest solution is to keep a separate libtorch copy that this builds with.
-(Example of [website](https://download.pytorch.org/libtorch/cu111) download pre-compiled versions of pytorch with cxx-11 ABI.)
+(Example of [website](https://download.pytorch.org/libtorch/cu111) download pre-compiled versions of pytorch with C++11 ABI.)
+
+If you are using the standard container maintained by the Tufts group, a copy of libtorch built with the C++11 ABI standard is located at
+
+```
+/usr/local/libtorch1.9.0_cxx11abi/
+```
+
+## Model and Model Files
+
+The current official model used in the LANTERN reconstruction is defined in the file
+
+```
+models/models_instanceNorm_reco_2chan_quadTask.py
+```
+
+The file we need to load and run the model is a Torch Script file.
+This is more than just the saved weights: it has a description of the model as well that libtorch (specifically caffe2)
+needs. You can make a torch script file from a weights file using `make_prongcnn_script.py` found in the `utils` folder.
+
 
 ## Building
 
+Note: you first need to set the environment for the `ubdl` repository or modify `setenv.sh` to point to your copy.
+
 ```bash
+source setenv.sh # will setup env variables for larpid but also setup ubdl
 cd larpid
 mkdir build && cd build
 cmake ..
@@ -159,5 +181,5 @@ LArPID is designed to work within the DLGen2 reconstruction chain:
 
 ## Pre-trained Model
 
-The default prongCNN model is available at:
-`/uboone/data/users/mmr/prongCNN/ResNet34_recoProng_5class_epoch20.pt`
+The default prongCNN model is available on CVMFS at:
+`/cvmfs/uboone.opensciencegrid.org/containers/lantern_v2_me_06_03_prod/cluster/home/prongCNN/models/checkpoints/LArPID_default_network_weights.pt`
