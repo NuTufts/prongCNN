@@ -18,13 +18,14 @@ class ResBlock(nn.Module):
         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn1 = nn.InstanceNorm2d(out_channels, track_running_stats=False, affine=True)
         self.bn2 = nn.InstanceNorm2d(out_channels, track_running_stats=False, affine=True)
+        self.relu = nn.ReLU()
 
     def forward(self, X):
         shortcut = self.shortcut(X)
-        X = nn.ReLU()(self.bn1(self.conv1(X)))
-        X = nn.ReLU()(self.bn2(self.conv2(X)))
+        X = self.relu(self.bn1(self.conv1(X)))
+        X = self.relu(self.bn2(self.conv2(X)))
         X = X + shortcut
-        return nn.ReLU()(X)
+        return self.relu(X)
     
 
 
@@ -75,6 +76,7 @@ class ResNet34(nn.Module):
         self.fcRegP = nn.Linear(1536, 1)
         
         self.logSoftmax = nn.LogSoftmax(dim=1)
+        self.sigmoid = nn.Sigmoid()
 
 
     def forward(self, X):
@@ -114,7 +116,7 @@ class ResNet34(nn.Module):
         XregP = self.fcRegP(X)
         Xproc = self.fcProc(X)
 
-        outputs = [self.logSoftmax(Xclass), nn.Sigmoid()(XregC).squeeze(), nn.Sigmoid()(XregP).squeeze(), self.logSoftmax(Xproc)]
+        outputs = [self.logSoftmax(Xclass), self.sigmoid(XregC).squeeze(), self.sigmoid(XregP).squeeze(), self.logSoftmax(Xproc)]
         return outputs
 
 
