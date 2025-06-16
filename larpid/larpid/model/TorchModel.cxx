@@ -27,11 +27,11 @@ void TorchModel::Initialize(const std::string& model_path, const bool& debug) {
         
         // Initialize normalization parameters (from dataset mean/std)
         // These values should match those in datasets_reco_5ClassHardLabel_quadTask.py
-        _mean_vals = std::vector<float>{0.5924, 0.5924, 0.5924, 0.5924, 0.5924, 0.5924};
-        _std_vals  = std::vector<float>{5.7890, 5.7890, 5.7890, 5.7890, 5.7890, 5.7890};
+        _mean_vals = std::vector<double>{57.8182, 57.8182, 58.1807, 58.1807, 50.5312, 50.5312};
+        _std_vals  = std::vector<double>{62.9932, 62.9932, 62.6569, 62.6569, 42.0027, 42.0027};
         
-        norm_mean = torch::from_blob(_mean_vals.data(), {1,6,1,1}, torch::kFloat32);
-        norm_std  = torch::from_blob(_std_vals.data(),  {1,6,1,1}, torch::kFloat32);
+        norm_mean = torch::from_blob(_mean_vals.data(), {6}, torch::kFloat32);
+        norm_std  = torch::from_blob(_std_vals.data(),  {6}, torch::kFloat32);
 
         // auto options = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
         // norm_mean = torch::zeros({1,6,1,1}, options);
@@ -87,13 +87,19 @@ larpid::data::ModelOutput
 TorchModel::run_inference(const std::vector<std::vector<larpid::data::CropPixData_t>>& pixelData) {
     
     larpid::data::ModelOutput output;
+
+    if ( pixelData.size()!=6 ) {
+        throw std::runtime_error("Wrong number of sparse images in pixelData");
+    }
     
     try {
         // Create input tensor (1, 6, 512, 512)
         torch::Tensor input = torch::zeros({1, 6, 512, 512}, torch::kFloat32);
         
         // Fill tensor with pixel data
-        for (size_t ch = 0; ch < pixelData.size() && ch < 6; ch++) {
+        for (size_t ch = 0; ch < 3; ch++) {
+
+            // prong image
             for (const auto& pix : pixelData[ch]) {
                 if (pix.row >= 0 && pix.row < 512 && pix.col >= 0 && pix.col < 512) {
 
@@ -104,7 +110,22 @@ TorchModel::run_inference(const std::vector<std::vector<larpid::data::CropPixDat
                         throw std::runtime_error("Bad input tensor pixel value");
                     }
 
-                    input[0][ch][pix.row][pix.col] = pix.adc;
+                    input[0][2*ch][pix.row][pix.col] = pix.adc;
+                }
+            }
+
+            // full context image
+            for (const auto& pix : pixelData[3+ch]) {
+                if (pix.row >= 0 && pix.row < 512 && pix.col >= 0 && pix.col < 512) {
+
+                    if ( std::isnan(pix.adc) || std::isinf(pix.adc) ) {
+                        std::cerr << "Bad pixel value "
+                                  << "@ [" << ch << ", " << pix.row << ", " << pix.col << "] "
+                                  << " pix.adc=" << pix.adc << std::endl;
+                        throw std::runtime_error("Bad input tensor pixel value");
+                    }
+
+                    input[0][2*ch+1][pix.row][pix.col] = pix.adc;
                 }
             }
         }
@@ -128,8 +149,13 @@ TorchModel::run_inference(const std::vector<std::vector<larpid::data::CropPixDat
         }
 
         // Normalize input
-        input = (input - norm_mean.view({1, 6, 1, 1})) / norm_std.view({1, 6, 1, 1});
+        //input = (input - norm_mean.view({1, 6, 1, 1})) / norm_std.view({1, 6, 1, 1});
+        auto normalizer = torch::data::transforms::Normalize<>(_mean_vals, _std_vals);
+        input = normalizer(input);
         
+        // Clamp
+        input = torch::clamp(input,-1000.0,4.0);
+
         torch::Tensor is_inf_tensor = torch::isinf(input); 
 
         if (is_inf_tensor.any().item<bool>()) {

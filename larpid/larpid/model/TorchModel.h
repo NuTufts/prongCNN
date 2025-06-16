@@ -25,8 +25,8 @@ namespace model {
     size_t getChannel(const size_t& pixDataIndex);
     void printTensorValues(const torch::Tensor& tensor);
 
-    std::vector<float> _mean_vals;
-    std::vector<float> _std_vals;
+    std::vector<double> _mean_vals;
+    std::vector<double> _std_vals;
 
   public:
     //TorchModel(const std::string& model_path, const bool& useGPU=false);

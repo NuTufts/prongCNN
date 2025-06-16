@@ -255,6 +255,13 @@ int main( int nargs, char** argv ) {
         if (!reader.readEntry(ientry, vertices)) {
             throw std::runtime_error("Error getting NuVertex candidates");
         }
+
+        auto ev_adc = (larcv::EventImage2D*)ioman.get_data(larcv::kProductImage2D,"wire");
+        std::cout << "Event: (" << ioman.event_id().run() << ", " 
+                    <<  ioman.event_id().subrun() << ", "
+                    <<  ioman.event_id().event()  << ")"
+                    <<  std::endl;
+
         int nvertices = vertices.size();
         std::cout << "number of neutrino candidates: " << nvertices << std::endl;
 
@@ -273,6 +280,7 @@ int main( int nargs, char** argv ) {
             int nshowers = nuvtx.shower_v.size();
 
             std::cout << "NuCandidate[" << ivtx << "]" << std::endl;
+            std::cout << " pos=(" << nuvtx.pos[0] << "," << nuvtx.pos[1] << "," << nuvtx.pos[2] << ")" << std::endl;
             std::cout << " ntracks=" << ntracks << std::endl;
             std::cout << " nshowers=" << nshowers << std::endl;
             
@@ -344,6 +352,11 @@ int main( int nargs, char** argv ) {
                         maxgoodplane = npixels;
                     if ( npixels>=10 )
                         num_good_planes += 1;
+
+                    // for (int ipix=0; ipix<npixels; ipix++) {
+                    //     auto& pix = prong_vv.at(p).at(ipix);
+                    //     std::cout << "  [" << ipix << "] (" << pix.row << "," << pix.col << ") " << pix.adc << std::endl;
+                    // }
                 }
                 nucand_track_numgoodplanes[ivtx].push_back(num_good_planes);
                 nucand_track_maxplanepixels[ivtx].push_back(maxgoodplane);
@@ -362,6 +375,13 @@ int main( int nargs, char** argv ) {
                         nucand_track_muon_score[ivtx].push_back(output.classScores[2]);
                         nucand_track_pion_score[ivtx].push_back(output.classScores[3]);
                         nucand_track_proton_score[ivtx].push_back(output.classScores[4]);
+
+                        std::cout << "  electron score: " << output.classScores[0] << std::endl;
+                        std::cout << "  photon score: "   << output.classScores[1] << std::endl;
+                        std::cout << "  muon score: "     << output.classScores[2] << std::endl;
+                        std::cout << "  pion score: "     << output.classScores[3] << std::endl;
+                        std::cout << "  proton score: "   << output.classScores[4] << std::endl;
+
                     } else {
                         // Default values if model output is unexpected
                         nucand_track_electron_score[ivtx].push_back(-899.0);
@@ -448,6 +468,13 @@ int main( int nargs, char** argv ) {
                         nucand_shower_muon_score[ivtx].push_back(output.classScores[2]);
                         nucand_shower_pion_score[ivtx].push_back(output.classScores[3]);
                         nucand_shower_proton_score[ivtx].push_back(output.classScores[4]);
+
+                        std::cout << "  electron score: " << output.classScores[0] << std::endl;
+                        std::cout << "  photon score: "   << output.classScores[1] << std::endl;
+                        std::cout << "  muon score: "     << output.classScores[2] << std::endl;
+                        std::cout << "  pion score: "     << output.classScores[3] << std::endl;
+                        std::cout << "  proton score: "   << output.classScores[4] << std::endl;
+                        
                     } else {
                         // Default values if model output is unexpected
                         nucand_shower_electron_score[ivtx].push_back(-899.0);
