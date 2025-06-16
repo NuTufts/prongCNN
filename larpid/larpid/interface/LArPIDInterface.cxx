@@ -10,7 +10,7 @@ namespace interface {
   std::vector< std::vector<larpid::data::CropPixData_t> >
   make_cropped_initial_sparse_prong_image_reco( const std::vector<larcv::Image2D>& adc_v,
                                                 const std::vector<larcv::Image2D>& thrumu_v,
-                                                const larlite::larflowcluster& prong,
+                                                const std::vector< std::vector<float> >& prong,
                                                 const TVector3& cropCenter, 
                                                 float threshold, int rowSpan, int colSpan ) {
 
@@ -32,7 +32,7 @@ namespace interface {
 
   std::vector< std::vector<larpid::data::CropPixData_t> >
   make_prongCNN_input_sparse_images( larcv::IOManager& iolcv,
-                                     const larlite::larflowcluster& prong,
+                                     const std::vector< std::vector<float> >& prong,
                                      const TVector3& cropCenter, 
                                      bool preserve_shower_pixels,
                                      float threshold, int rowSpan, int colSpan,
@@ -94,15 +94,16 @@ namespace interface {
 
   void getRecoImageBounds( std::vector< std::vector<int> >& imgBounds,
                            const std::vector<larcv::Image2D>& adc_v,
-                           const larlite::larflowcluster& prong,
+                           const std::vector< std::vector<float> >& prong,
                            const TVector3& cropCenter, int rowSpan, int colSpan ) {
 
     std::vector< std::vector<int> > prongBounds;
     for ( size_t p=0; p<adc_v.size(); p++ ) {
       std::vector<int> planeProngBounds{9999999,-9999999,9999999,-9999999};
       for( const auto& hit : prong ){
-        int row = (hit.tick - 2400)/6;
-        int col = hit.targetwire[p];
+        float tick = hit[3];
+        int row = (int)(tick - 2400)/6;
+        int col = hit[4+p];  //hit.targetwire[p];
         if(row < planeProngBounds[0]) planeProngBounds[0] = row;
         if(row > planeProngBounds[1]) planeProngBounds[1] = row;
         if(col < planeProngBounds[2]) planeProngBounds[2] = col;
@@ -159,15 +160,19 @@ namespace interface {
                                const float& threshold,
                                const std::vector<larcv::Image2D>& adc_v,
                                const std::vector<larcv::Image2D>& thrumu_v,
-                               const larlite::larflowcluster& prong,
+                               const std::vector< std::vector<float> >& prong,
                                const std::vector< std::vector<int> >& imgBounds) {
 
     for ( size_t p=0; p<adc_v.size(); p++ ) {
 
       for( const auto& hit : prong ){
         // TO DO: REPLACE HARD-CODED VALUES!!!
-        int row = (hit.tick - 2400)/6;
-        int col = hit.targetwire[p];
+        // int row = (hit.tick - 2400)/6;
+        // int col = hit.targetwire[p];
+        float tick = hit[3];
+        int row = (int)(tick - 2400)/6;
+        int col = hit[4+p];
+
         float val = adc_v[p].pixel(row, col);
         float val_cosmic = thrumu_v[p].pixel(row, col);
           if ( val >= threshold && val_cosmic < threshold ){
@@ -201,15 +206,20 @@ namespace interface {
                                const std::vector<larcv::Image2D>& adc_v,
                                const std::vector<larcv::Image2D>& thrumu_v,
                                const std::vector<const larcv::Image2D*>& showerimg_v,
-                               const larlite::larflowcluster& prong,
+                               const std::vector< std::vector<float> >& prong,
                                const std::vector< std::vector<int> >& imgBounds) {
 
     for ( size_t p=0; p<adc_v.size(); p++ ) {
 
       for( const auto& hit : prong ){
         // TO DO: REPLACE HARD-CODED VALUES!!!
-        int row = (hit.tick - 2400)/6;
-        int col = hit.targetwire[p];
+        // int row = (hit.tick - 2400)/6;
+        // int col = hit.targetwire[p];
+        
+        float tick = hit[3];
+        int row = (int)(tick - 2400)/6;
+        int col = hit[4+p];
+
         float val = adc_v[p].pixel(row, col);
         float val_cosmic = thrumu_v[p].pixel(row, col);
         float shower_score = showerimg_v[p]->pixel(row,col);

@@ -12,7 +12,9 @@
 #include "larcv/core/DataFormat/IOManager.h"
 #include "larcv/core/DataFormat/EventImage2D.h"
 
-#include "larflow/Reco/NuVertexCandidate.h"
+//#include "larflow/Reco/NuVertexCandidate.h"
+#include "larpid/data/NuVertexCandidateHDF5Reader.h"
+#include "larpid/data/NuVertex.h"
 
 #include "larpid/interface/LArPIDInterface.h"
 
@@ -102,20 +104,25 @@ int main( int nargs, char** argv ) {
     ioman.reverse_all_products();
     ioman.initialize();
 
-    TFile recofile( kpsreco_file.c_str() );
-    TTree* recotree = (TTree*)recofile.Get( "KPSRecoManagerTree" );
+    // TFile recofile( kpsreco_file.c_str() );
+    // TTree* recotree = (TTree*)recofile.Get( "KPSRecoManagerTree" );
+    // The hdf5 reader loads KPSRecoManagerTree data that was dumped to an hdf5 file.
+    larpid::data::NuVertexCandidateHDF5Reader reader;
+    
+    // Open file
+    std::cout << "Opening HDF5 file: " << kpsreco_file << std::endl;
+    if (!reader.open(kpsreco_file)) {
+      std::cerr << "Error: Failed to open file" << std::endl;
+      return 1;
+    }
 
     int nentries = ioman.get_n_entries();
-    int nentries_reco = recotree->GetEntries();
+    int nentries_reco = reader.getNumEntries();
 
     if ( nentries!=nentries_reco ) {
         std::cout << "Number of entries do not match: iomanager=" << nentries << "  reco=" << nentries_reco << std::endl;
         return 1;
     }
-
-    std::vector< larflow::reco::NuVertexCandidate >* nuvetoed_v = nullptr;
-    recotree->SetBranchAddress( "nuvetoed_v", &nuvetoed_v );
-
     // output file
     TFile* outfile = new TFile( output_file.c_str(), "new" ); // dont overwrite
     TTree* outtree = new TTree( "larpidTree", "Output of the LArPID CNN on neutrino candidate prongs");
@@ -138,7 +145,9 @@ int main( int nargs, char** argv ) {
     std::vector< std::vector<float> > nucand_track_purity;         // first index is nucand, second index is over tracks
     std::vector< std::vector<float> > nucand_track_completeness;   // first index is nucand, second index is over tracks
 
-    std::vector< std::vector<float> > nucand_track_process_score;  // first index is nucand, second index is over tracks
+    std::vector< std::vector<float> > nucand_track_process_primary;  // first index is nucand, second index is over showers
+    std::vector< std::vector<float> > nucand_track_process_fromcharged;  // first index is nucand, second index is over showers
+    std::vector< std::vector<float> > nucand_track_process_fromneutral;  // first index is nucand, second index is over showers
     std::vector< std::vector<int> >   nucand_track_process;        // first index is nucand, second index is over tracks
 
     // for the shower variables below: first index is nucand, second index is over showers
@@ -155,50 +164,55 @@ int main( int nargs, char** argv ) {
     std::vector< std::vector<float> > nucand_shower_purity;         // first index is nucand, second index is over showers
     std::vector< std::vector<float> > nucand_shower_completeness;   // first index is nucand, second index is over showers
 
-    std::vector< std::vector<float> > nucand_shower_process_score;  // first index is nucand, second index is over showers
+    std::vector< std::vector<float> > nucand_shower_process_primary;  // first index is nucand, second index is over showers
+    std::vector< std::vector<float> > nucand_shower_process_fromcharged;  // first index is nucand, second index is over showers
+    std::vector< std::vector<float> > nucand_shower_process_fromneutral;  // first index is nucand, second index is over showers
     std::vector< std::vector<int> >   nucand_shower_process;        // first index is nucand, second index is over showers
 
     // Create TTree branches for output data
     outtree->Branch("nucand_num_vertices", &nucand_num_vertices, "nucand_num_vertices/I");
-    outtree->Branch("nucand_num_tracks", &nucand_num_tracks);
-    outtree->Branch("nucand_num_showers", &nucand_num_showers);
+    outtree->Branch("nucand_num_tracks",   &nucand_num_tracks);
+    outtree->Branch("nucand_num_showers",  &nucand_num_showers);
     
     // Track branches
-    outtree->Branch("nucand_track_modelrun",       &nucand_track_modelrun);
-    outtree->Branch("nucand_track_maxplanepixels", &nucand_track_maxplanepixels);
-    outtree->Branch("nucand_track_numgoodplanes",  &nucand_track_numgoodplanes);
-    outtree->Branch("nucand_track_electron_score", &nucand_track_electron_score);
-    outtree->Branch("nucand_track_photon_score",   &nucand_track_photon_score);
-    outtree->Branch("nucand_track_muon_score",     &nucand_track_muon_score);
-    outtree->Branch("nucand_track_proton_score",   &nucand_track_proton_score);
-    outtree->Branch("nucand_track_pion_score",     &nucand_track_pion_score);
-    outtree->Branch("nucand_track_pid",            &nucand_track_pid);
-    outtree->Branch("nucand_track_purity",         &nucand_track_purity);
-    outtree->Branch("nucand_track_completeness",   &nucand_track_completeness);
-    outtree->Branch("nucand_track_process_score",  &nucand_track_process_score);
-    outtree->Branch("nucand_track_process",        &nucand_track_process);
+    outtree->Branch("nucand_track_modelrun",            &nucand_track_modelrun);
+    outtree->Branch("nucand_track_maxplanepixels",      &nucand_track_maxplanepixels);
+    outtree->Branch("nucand_track_numgoodplanes",       &nucand_track_numgoodplanes);
+    outtree->Branch("nucand_track_electron_score",      &nucand_track_electron_score);
+    outtree->Branch("nucand_track_photon_score",        &nucand_track_photon_score);
+    outtree->Branch("nucand_track_muon_score",          &nucand_track_muon_score);
+    outtree->Branch("nucand_track_proton_score",        &nucand_track_proton_score);
+    outtree->Branch("nucand_track_pion_score",          &nucand_track_pion_score);
+    outtree->Branch("nucand_track_pid",                 &nucand_track_pid);
+    outtree->Branch("nucand_track_purity",              &nucand_track_purity);
+    outtree->Branch("nucand_track_completeness",        &nucand_track_completeness);
+    outtree->Branch("nucand_track_process_primary",     &nucand_track_process_primary);
+    outtree->Branch("nucand_track_process_fromcharged", &nucand_track_process_fromcharged);
+    outtree->Branch("nucand_track_process_fromneutral", &nucand_track_process_fromneutral);
+    outtree->Branch("nucand_track_process",             &nucand_track_process);
     
     // Shower branches
-    outtree->Branch("nucand_shower_modelrun",       &nucand_shower_modelrun);
-    outtree->Branch("nucand_shower_maxplanepixels", &nucand_shower_maxplanepixels);
-    outtree->Branch("nucand_shower_numgoodplanes",  &nucand_shower_numgoodplanes);
-    outtree->Branch("nucand_shower_electron_score", &nucand_shower_electron_score);
-    outtree->Branch("nucand_shower_photon_score", &nucand_shower_photon_score);
-    outtree->Branch("nucand_shower_muon_score", &nucand_shower_muon_score);
-    outtree->Branch("nucand_shower_proton_score", &nucand_shower_proton_score);
-    outtree->Branch("nucand_shower_pion_score", &nucand_shower_pion_score);
-    outtree->Branch("nucand_shower_pid", &nucand_shower_pid);
-    outtree->Branch("nucand_shower_purity", &nucand_shower_purity);
-    outtree->Branch("nucand_shower_completeness", &nucand_shower_completeness);
-    outtree->Branch("nucand_shower_process_score", &nucand_shower_process_score);
-    outtree->Branch("nucand_shower_process", &nucand_shower_process);
+    outtree->Branch("nucand_shower_modelrun",            &nucand_shower_modelrun);
+    outtree->Branch("nucand_shower_maxplanepixels",      &nucand_shower_maxplanepixels);
+    outtree->Branch("nucand_shower_numgoodplanes",       &nucand_shower_numgoodplanes);
+    outtree->Branch("nucand_shower_electron_score",      &nucand_shower_electron_score);
+    outtree->Branch("nucand_shower_photon_score",        &nucand_shower_photon_score);
+    outtree->Branch("nucand_shower_muon_score",          &nucand_shower_muon_score);
+    outtree->Branch("nucand_shower_proton_score",        &nucand_shower_proton_score);
+    outtree->Branch("nucand_shower_pion_score",          &nucand_shower_pion_score);
+    outtree->Branch("nucand_shower_pid",                 &nucand_shower_pid);
+    outtree->Branch("nucand_shower_purity",              &nucand_shower_purity);
+    outtree->Branch("nucand_shower_completeness",        &nucand_shower_completeness);
+    outtree->Branch("nucand_shower_process_primary",     &nucand_shower_process_primary);
+    outtree->Branch("nucand_shower_process_fromcharged", &nucand_shower_process_fromcharged);
+    outtree->Branch("nucand_shower_process_fromneutral", &nucand_shower_process_fromneutral);
+    outtree->Branch("nucand_shower_process",             &nucand_shower_process);
 
     for (int ientry=0; ientry<nentries; ientry++) {
 
         std::cout << "Entry " << ientry << std::endl;
 
         ioman.read_entry(ientry);
-        recotree->GetEntry(ientry);
 
         // Clear all branch vectors for new entry
         nucand_num_vertices = 0;
@@ -216,7 +230,9 @@ int main( int nargs, char** argv ) {
         nucand_track_pid.clear();
         nucand_track_purity.clear();
         nucand_track_completeness.clear();
-        nucand_track_process_score.clear();
+        nucand_track_process_primary.clear();
+        nucand_track_process_fromcharged.clear();
+        nucand_track_process_fromneutral.clear();
         nucand_track_process.clear();
         
         nucand_shower_modelrun.clear();
@@ -230,20 +246,28 @@ int main( int nargs, char** argv ) {
         nucand_shower_pid.clear();
         nucand_shower_purity.clear();
         nucand_shower_completeness.clear();
-        nucand_shower_process_score.clear();
+        nucand_shower_process_primary.clear();
+        nucand_shower_process_fromcharged.clear();
+        nucand_shower_process_fromneutral.clear();
         nucand_shower_process.clear();
 
-        int nvertices = (int)(nuvetoed_v->size());
+        std::vector<larpid::data::NuVertex> vertices;
+        if (!reader.readEntry(ientry, vertices)) {
+            throw std::runtime_error("Error getting NuVertex candidates");
+        }
+        int nvertices = vertices.size();
         std::cout << "number of neutrino candidates: " << nvertices << std::endl;
+
         nucand_num_vertices = nvertices;
 
         if ( nvertices==0 ) {
           outtree->Fill();
           continue;
         }
-        
+
         for (int ivtx=0; ivtx<nvertices; ivtx++ ) {
-            auto& nuvtx = nuvetoed_v->at(ivtx);
+
+            auto& nuvtx = vertices.at(ivtx);
 
             int ntracks  = nuvtx.track_v.size();
             int nshowers = nuvtx.shower_v.size();
@@ -268,7 +292,9 @@ int main( int nargs, char** argv ) {
             nucand_track_pid.push_back(std::vector<int>());
             nucand_track_purity.push_back(std::vector<float>());
             nucand_track_completeness.push_back(std::vector<float>());
-            nucand_track_process_score.push_back(std::vector<float>());
+            nucand_track_process_primary.push_back(std::vector<float>());
+            nucand_track_process_fromcharged.push_back(std::vector<float>());
+            nucand_track_process_fromneutral.push_back(std::vector<float>());
             nucand_track_process.push_back(std::vector<int>());
             
             nucand_shower_modelrun.push_back(std::vector<int>());
@@ -282,7 +308,9 @@ int main( int nargs, char** argv ) {
             nucand_shower_pid.push_back(std::vector<int>());
             nucand_shower_purity.push_back(std::vector<float>());
             nucand_shower_completeness.push_back(std::vector<float>());
-            nucand_shower_process_score.push_back(std::vector<float>());
+            nucand_shower_process_primary.push_back(std::vector<float>());
+            nucand_shower_process_fromcharged.push_back(std::vector<float>());
+            nucand_shower_process_fromneutral.push_back(std::vector<float>());
             nucand_shower_process.push_back(std::vector<int>());
 
             for (int itrack=0; itrack<ntracks; itrack++ ) {
@@ -290,16 +318,23 @@ int main( int nargs, char** argv ) {
                 auto& hitcluster = nuvtx.track_hitcluster_v.at(itrack);
                 auto& track = nuvtx.track_v.at(itrack);
 
-                int npts = track.NumberTrajectoryPoints();
-                TVector3 endpt = track.LocationAtPoint(npts-1);
+                std::cout << "track[" << itrack << "]" << std::endl;
+
+                int npts = track.size();
+                std::vector<float>& endpt = track.at(npts-1);
+                TVector3 vendpt( endpt[0], endpt[1], endpt[2] );
         
+                std::cout << " npts=" << npts << std::endl;
+                std::cout << " nhits=" << hitcluster.size() << std::endl;
+                std::cout << " endpt=(" << endpt[0] << "," << endpt[1] << "," << endpt[2] << ")" << std::endl;
+
                 // std::vector< std::vector<larpid::data::CropPixData_t> > prong_vv
                 //  = larpid::interface::make_cropped_initial_sparse_prong_image_reco( adc_v, 
                 //      thrumu_v, hitcluster, endpt, 10.0, 512, 512 );
                 std::vector< std::vector<larpid::data::CropPixData_t> > prong_vv
-                 = larpid::interface::make_prongCNN_input_sparse_images( ioman, hitcluster, endpt, preserve_shower_pixels );
+                 = larpid::interface::make_prongCNN_input_sparse_images( ioman, hitcluster, vendpt, preserve_shower_pixels );
 
-                std::cout << "track[" << itrack << "]" << std::endl;
+
                 int num_good_planes = 0;
                 int maxgoodplane = 0;
                 for (int p=0; p<3; p++) {
@@ -329,21 +364,25 @@ int main( int nargs, char** argv ) {
                         nucand_track_proton_score[ivtx].push_back(output.classScores[4]);
                     } else {
                         // Default values if model output is unexpected
-                        nucand_track_electron_score[ivtx].push_back(-999.0);
-                        nucand_track_photon_score[ivtx].push_back(-999.0);
-                        nucand_track_muon_score[ivtx].push_back(-999.0);
-                        nucand_track_pion_score[ivtx].push_back(-999.0);
-                        nucand_track_proton_score[ivtx].push_back(-999.0);
+                        nucand_track_electron_score[ivtx].push_back(-899.0);
+                        nucand_track_photon_score[ivtx].push_back(-899.0);
+                        nucand_track_muon_score[ivtx].push_back(-899.0);
+                        nucand_track_pion_score[ivtx].push_back(-899.0);
+                        nucand_track_proton_score[ivtx].push_back(-899.0);
                     }
                     
                     nucand_track_pid[ivtx].push_back(output.predictedPID);
                     nucand_track_purity[ivtx].push_back(output.purity);
                     nucand_track_completeness[ivtx].push_back(output.completeness);
                     
-                    if (output.processScores.size() > 0) {
-                        nucand_track_process_score[ivtx].push_back(output.processScores[0]);
+                    if (output.processScores.size() >=3 ) {
+                        nucand_track_process_primary[ivtx].push_back(output.processScores[0]);
+                        nucand_track_process_fromcharged[ivtx].push_back(output.processScores[1]);
+                        nucand_track_process_fromneutral[ivtx].push_back(output.processScores[2]);
                     } else {
-                        nucand_track_process_score[ivtx].push_back(-999.0);
+                        nucand_track_process_primary[ivtx].push_back(-899.0);
+                        nucand_track_process_fromcharged[ivtx].push_back(-899);
+                        nucand_track_process_fromneutral[ivtx].push_back(-899);
                     }
                     nucand_track_process[ivtx].push_back(output.predictedProcess);
                 }
@@ -360,7 +399,9 @@ int main( int nargs, char** argv ) {
                     nucand_track_pid[ivtx].push_back(-999);
                     nucand_track_purity[ivtx].push_back(-999.0);
                     nucand_track_completeness[ivtx].push_back(-999.0);
-                    nucand_track_process_score[ivtx].push_back(-999.0);
+                    nucand_track_process_primary[ivtx].push_back(-999.0);
+                    nucand_track_process_fromcharged[ivtx].push_back(-999);
+                    nucand_track_process_fromneutral[ivtx].push_back(-999);
                     nucand_track_process[ivtx].push_back(-999);
                 }
             }
@@ -369,14 +410,15 @@ int main( int nargs, char** argv ) {
 
                 auto& hitcluster = nuvtx.shower_v.at(ishower);
                 int npts = hitcluster.size();
-                larlite::track& shower_trunk = nuvtx.shower_trunk_v.at(ishower);
-                TVector3 startpt = shower_trunk.LocationAtPoint(0);
+                auto& shower_trunk = nuvtx.shower_trunk_v.at(ishower);
+                std::vector<float>& startpt = shower_trunk.at(0);
+                TVector3 vstart( startpt[0], startpt[1], startpt[2] );
         
                 // std::vector< std::vector<larpid::data::CropPixData_t> > prong_vv
                 //  = larpid::interface::make_cropped_initial_sparse_prong_image_reco( adc_v, 
                 //      thrumu_v, hitcluster, startpt, 10.0, 512, 512 );
                 std::vector< std::vector<larpid::data::CropPixData_t> > prong_vv
-                 = larpid::interface::make_prongCNN_input_sparse_images( ioman, hitcluster, startpt, preserve_shower_pixels );
+                 = larpid::interface::make_prongCNN_input_sparse_images( ioman, hitcluster, vstart, preserve_shower_pixels );
 
                 std::cout << "shower[" << ishower << "] npts=" << npts << std::endl;
                 int num_good_planes = 0;
@@ -408,22 +450,27 @@ int main( int nargs, char** argv ) {
                         nucand_shower_proton_score[ivtx].push_back(output.classScores[4]);
                     } else {
                         // Default values if model output is unexpected
-                        nucand_shower_electron_score[ivtx].push_back(-999.0);
-                        nucand_shower_photon_score[ivtx].push_back(-999.0);
-                        nucand_shower_muon_score[ivtx].push_back(-999.0);
-                        nucand_shower_pion_score[ivtx].push_back(-999.0);
-                        nucand_shower_proton_score[ivtx].push_back(-999.0);
+                        nucand_shower_electron_score[ivtx].push_back(-899.0);
+                        nucand_shower_photon_score[ivtx].push_back(-899.0);
+                        nucand_shower_muon_score[ivtx].push_back(-899.0);
+                        nucand_shower_pion_score[ivtx].push_back(-899.0);
+                        nucand_shower_proton_score[ivtx].push_back(-899.0);
                     }
                     
                     nucand_shower_pid[ivtx].push_back(output.predictedPID);
                     nucand_shower_purity[ivtx].push_back(output.purity);
                     nucand_shower_completeness[ivtx].push_back(output.completeness);
                     
-                    if (output.processScores.size() > 0) {
-                        nucand_shower_process_score[ivtx].push_back(output.processScores[0]);
+                    if (output.processScores.size() >=3 ) {
+                        nucand_shower_process_primary[ivtx].push_back(output.processScores[0]);
+                        nucand_shower_process_fromcharged[ivtx].push_back(output.processScores[1]);
+                        nucand_shower_process_fromneutral[ivtx].push_back(output.processScores[2]);
                     } else {
-                        nucand_shower_process_score[ivtx].push_back(-999.0);
+                        nucand_shower_process_primary[ivtx].push_back(-899.0);
+                        nucand_shower_process_fromcharged[ivtx].push_back(-899);
+                        nucand_shower_process_fromneutral[ivtx].push_back(-899);
                     }
+
                     nucand_shower_process[ivtx].push_back(output.predictedProcess);
 
                 }
@@ -440,7 +487,9 @@ int main( int nargs, char** argv ) {
                     nucand_shower_pid[ivtx].push_back(-999);
                     nucand_shower_purity[ivtx].push_back(-999.0);
                     nucand_shower_completeness[ivtx].push_back(-999.0);
-                    nucand_shower_process_score[ivtx].push_back(-999.0);
+                    nucand_shower_process_primary[ivtx].push_back(-999.0);
+                    nucand_shower_process_fromcharged[ivtx].push_back(-999);
+                    nucand_shower_process_fromneutral[ivtx].push_back(-999);
                     nucand_shower_process[ivtx].push_back(-999);
                 }
             }

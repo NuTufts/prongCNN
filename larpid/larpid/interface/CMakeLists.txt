@@ -52,7 +52,7 @@ target_link_libraries(${LIBNAME} PUBLIC
 include_directories( ${CMAKE_CURRENT_SOURCE_DIR} 
   ${PROJECT_SOURCE_DIR} 
   ${LARCV_INCLUDE_DIR} 
-  ${LARFLOW_INCLUDE_DIR}
+  #${LARFLOW_INCLUDE_DIR}
 )
 # ${LARLITE_INC_DIRS} ${PYTHON_INCLUDE_PATH} ${NUMPY_INCLUDES} ${OpenCV_INCLUDE_DIRS} ${xgboost_include_dirs} )
 ROOT_GENERATE_DICTIONARY(G__${LIBNAME} ${ROOTDICT_HEADERS} LINKDEF LinkDef.h)
@@ -67,7 +67,7 @@ target_link_libraries(test_interface
 PUBLIC
   LArPID_Data
   LArPID_Interface
-  LArFlow_Reco
+  #LArFlow_Reco
   LArCVCoreBase 
   LArCVCoreDataFormat
   LArCVCoreProcessor

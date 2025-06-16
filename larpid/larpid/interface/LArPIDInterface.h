@@ -26,13 +26,13 @@ namespace interface {
   std::vector< std::vector<larpid::data::CropPixData_t> >
     make_cropped_initial_sparse_prong_image_reco( const std::vector<larcv::Image2D>& adc_v,
                                                   const std::vector<larcv::Image2D>& thrumu_v,
-                                                  const larlite::larflowcluster& prong,
+                                                  const std::vector< std::vector<float> >& prong,
                                                   const TVector3& cropCenter,
                                                   float threshold, int rowSpan, int colSpan );
 
   std::vector< std::vector<larpid::data::CropPixData_t> >
   make_prongCNN_input_sparse_images( larcv::IOManager& iolcv,
-                                     const larlite::larflowcluster& prong,
+                                     const std::vector< std::vector<float> >& prong,
                                      const TVector3& cropCenter, 
                                      bool preserve_shower_pixels=false,
                                      float threshold=10.0, int rowSpan=512, int colSpan=512,
@@ -41,14 +41,14 @@ namespace interface {
 
   void getRecoImageBounds( std::vector< std::vector<int> >& imgBounds,
                            const std::vector<larcv::Image2D>& adc_v,
-                           const larlite::larflowcluster& prong,
+                           const std::vector< std::vector<float> >& prong,
                            const TVector3& cropCenter, int rowSpan, int colSpan );
 
   void fillProngImagesFromReco( std::vector< std::vector<larpid::data::CropPixData_t> >& sparseimg_vv,
                                 const float& threshold,
                                 const std::vector<larcv::Image2D>& adc_v,
                                 const std::vector<larcv::Image2D>& thrumu_v,
-                                const larlite::larflowcluster& prong,
+                                const std::vector< std::vector<float> >& prong,
                                 const std::vector< std::vector<int> >& imgBounds );
 
   void fillProngImagesFromRecoAndKeepShowers(std::vector< std::vector<larpid::data::CropPixData_t> >& sparseimg_vv,
@@ -56,7 +56,7 @@ namespace interface {
                                              const std::vector<larcv::Image2D>& adc_v,
                                              const std::vector<larcv::Image2D>& thrumu_v,
                                              const std::vector<const larcv::Image2D*>& showerimg_v,
-                                             const larlite::larflowcluster& prong,
+                                             const std::vector< std::vector<float> >& prong,
                                              const std::vector< std::vector<int> >& imgBounds);
 
   void fillContextImages( std::vector< std::vector<larpid::data::CropPixData_t> >& sparseimg_vv,

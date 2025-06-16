@@ -28,6 +28,9 @@ else ()
   set(CMAKE_CXX_STANDARD 11)
 endif()
 
+# --- HDF5
+find_package(HDF5 REQUIRED COMPONENTS C CXX HL)
+
 # #---OPENCV
 # if (USE_OPENCV)
 #   set(OpenCV_DIR $ENV{OPENCV_LIBDIR}/../share/OpenCV)
@@ -61,9 +64,6 @@ find_package( larlite REQUIRED )
 
 set( ublarcvapp_DIR "$ENV{UBLARCVAPP_LIBDIR}/cmake/ublarcvapp" )
 find_package( ublarcvapp REQUIRED )
-
-set( larflow_DIR "$ENV{LARFLOW_LIBDIR}/cmake/larflow" )
-find_package( larflow REQUIRED )
 
 # --- Torch
 if (ON_FNAL)
