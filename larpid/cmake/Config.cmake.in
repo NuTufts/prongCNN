@@ -1,5 +1,9 @@
 @PACKAGE_INIT@
 
+# Export the include directory
+set_and_check(LARPID_INCLUDE_DIR "@PACKAGE_LARPID_INCLUDE_DIR@")
+set_and_check(LARPID_LIBRARY_DIR "@PACKAGE_LARPID_LIBRARY_DIR@")
+
 include("${CMAKE_CURRENT_LIST_DIR}/larpidTargets.cmake")
 
 check_required_components(larpid)

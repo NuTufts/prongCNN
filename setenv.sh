@@ -3,10 +3,13 @@
 export PRONGCNN_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 export LARPID_DIR=${PRONGCNN_DIR}/larpid
 export LARPID_LIBDIR=${LARPID_DIR}/build/installed/lib
+export LARPID_INCDIR=${LARPID_DIR}/build/installed/include
 export LARPID_BINDIR=${LARPID_DIR}/build/installed/bin
 
 [[ ":$LD_LIBRARY_PATH:" != *":${LARPID_LIBDIR}:"* ]] && LD_LIBRARY_PATH="${LARPID_LIBDIR}:${LD_LIBRARY_PATH}"
 [[ ":$PATH:" != *":${LARPID_BINDIR}:"* ]] && PATH="${LARFLOW_BINDIR}:${PATH}"
+[[ ":${PYTHONPATH}:" != *":${PRONGCNN_DIR}:"* ]] && PYTHONPATH="${PRONGCNN_DIR}:${PYTHONPATH}"
+[[ ":${PYTHONPATH}:" != *":${PRONGCNN_DIR}/models:"* ]] && PYTHONPATH="${PRONGCNN_DIR}/models:${PYTHONPATH}"
 
 # SET LIBTORCH CXX-11 ABI ENVIRONMENT
 # This location is in the u20 container
