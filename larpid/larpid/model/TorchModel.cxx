@@ -20,6 +20,9 @@ TorchModel::TorchModel(const std::string& model_path, const bool& debug)
 void TorchModel::Initialize(const std::string& model_path, const bool& debug) {
     debug_mode = debug;
     
+    _mean_vals.clear();
+    _std_vals.clear();
+
     try {
         // Load the model
         model = torch::jit::load(model_path);
@@ -30,8 +33,8 @@ void TorchModel::Initialize(const std::string& model_path, const bool& debug) {
         _mean_vals = std::vector<double>{57.8182, 57.8182, 58.1807, 58.1807, 50.5312, 50.5312};
         _std_vals  = std::vector<double>{62.9932, 62.9932, 62.6569, 62.6569, 42.0027, 42.0027};
         
-        norm_mean = torch::from_blob(_mean_vals.data(), {6}, torch::kFloat32);
-        norm_std  = torch::from_blob(_std_vals.data(),  {6}, torch::kFloat32);
+        norm_mean = torch::from_blob(_mean_vals.data(), {6}, torch::kFloat64);
+        norm_std  = torch::from_blob(_std_vals.data(),  {6}, torch::kFloat64);
 
         // auto options = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
         // norm_mean = torch::zeros({1,6,1,1}, options);

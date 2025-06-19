@@ -76,16 +76,64 @@ namespace interface {
       sparseimg_vv[p+3].reserve( (int)( 0.1 * adc_v[p].as_vector().size() ) ); 
     }
 
+    std::cout << "Make input image from prong information" << std::endl;
+
     std::vector< std::vector<int> > imgBounds;
-    getRecoImageBounds(imgBounds, adc_v, prong, cropCenter, rowSpan, colSpan);
+    try {
+      getRecoImageBounds(imgBounds, adc_v, prong, cropCenter, rowSpan, colSpan);
+    }
+    catch ( std::exception& e ) {
+      std::stringstream msg;
+      msg << "make_prongCNN_input_sparse_images - getRecoImageBounds: error" << std::endl;
+      msg << e.what() << std::endl;
+      throw std::runtime_error( msg.str() );
+    }
+    std::stringstream imgbound_msg;
+    imgbound_msg << "image bounds: " << std::endl;
+    for ( auto const& bound : imgBounds ) 
+      imgbound_msg << "  " << bound[0] << " " << bound[1] << " " << bound[2] << " " << bound[3] << std::endl;
+    std::cout << imgbound_msg.str() << std::endl;
 
     if ( !preserve_shower_pixels ) {
-      fillProngImagesFromReco(sparseimg_vv, threshold, adc_v, thrumu_v, prong, imgBounds);
-      fillContextImages(sparseimg_vv, threshold, adc_v, thrumu_v, imgBounds);
+      std::cout << "Make prong image (with showers)" << std::endl;
+      try {
+        fillProngImagesFromReco(sparseimg_vv, threshold, adc_v, thrumu_v, prong, imgBounds);
+      }
+      catch (std::exception& e ) {
+        std::stringstream msg;
+        msg << "make_prongCNN_input_sparse_images - fillProngImagesFromReco: has an error" << std::endl;
+        msg << e.what() << std::endl;
+      }
+
+      try {
+        fillContextImages(sparseimg_vv, threshold, adc_v, thrumu_v, imgBounds);
+      }
+      catch (std::exception& e) {
+        std::stringstream msg;
+        msg << "make_prongCNN_input_sparse_images - fillContextImages: has an error" << std::endl;
+        msg << e.what() << std::endl;
+      }
     }
     else {
-      fillProngImagesFromRecoAndKeepShowers(sparseimg_vv, threshold, adc_v, thrumu_v, showerimg_v, prong, imgBounds);
-      fillContextImages(sparseimg_vv, threshold, adc_v, thrumu_v, imgBounds);
+      std::cout << "Make prong image (with showers)" << std::endl;
+      try {
+        fillProngImagesFromRecoAndKeepShowers(sparseimg_vv, threshold, adc_v, thrumu_v, showerimg_v, prong, imgBounds);
+      }
+      catch ( std::exception& e ) {
+        std::stringstream msg;
+        msg << "make_prongCNN_input_sparse_images - fillProngImagesFromRecoAndKeepShowers: has an error" << std::endl;
+        msg << e.what() << std::endl;
+      }
+
+      std::cout << "Make context image (with showers)" << std::endl;
+      try {
+        fillContextImages(sparseimg_vv, threshold, adc_v, thrumu_v, imgBounds);
+      }
+      catch (std::exception& e) {
+        std::stringstream msg;
+        msg << "make_prongCNN_input_sparse_images - fillContextImages: has an error" << std::endl;
+        msg << e.what() << std::endl;
+      }
     }
 
     return sparseimg_vv;
@@ -101,14 +149,23 @@ namespace interface {
     for ( size_t p=0; p<adc_v.size(); p++ ) {
       std::vector<int> planeProngBounds{9999999,-9999999,9999999,-9999999};
       for( const auto& hit : prong ){
+
+        //std::cout << "("  << hit[3] << " " << hit[4] << " " << hit[5] << " " << hit[6] << ")" << std::endl;
         float tick = hit[3];
-        int row = (int)(tick - 2400)/6;
-        int col = hit[4+p];  //hit.targetwire[p];
+        int row = (int)((tick - 2400)/6);
+        int col = (int)hit[4+p];  //hit.targetwire[p];
         if(row < planeProngBounds[0]) planeProngBounds[0] = row;
         if(row > planeProngBounds[1]) planeProngBounds[1] = row;
         if(col < planeProngBounds[2]) planeProngBounds[2] = col;
         if(col > planeProngBounds[3]) planeProngBounds[3] = col;
       }
+      // std::cout << "plane[" << p << "] "
+      //           << "planeProngBounds: " 
+      //           << " " << planeProngBounds[0]
+      //           << " " << planeProngBounds[1]
+      //           << " " << planeProngBounds[2]
+      //           << " " << planeProngBounds[3]
+      //           << std::endl;
       prongBounds.push_back(planeProngBounds);
     }
 
@@ -169,6 +226,14 @@ namespace interface {
         // TO DO: REPLACE HARD-CODED VALUES!!!
         // int row = (hit.tick - 2400)/6;
         // int col = hit.targetwire[p];
+
+        if ( hit.size()<7 ) {
+          std::stringstream errmsg;
+          errmsg << "Error: Prong hit provided to larpid::interface::fillProngImagesFromReco size<7. " << std::endl;
+          errmsg << "Needs to be (x,y,z,tick,U-wire,V-wire,Y-wire)" << std::endl;
+          throw std::runtime_error(errmsg.str());
+        }
+
         float tick = hit[3];
         int row = (int)(tick - 2400)/6;
         int col = hit[4+p];
@@ -215,10 +280,19 @@ namespace interface {
         // TO DO: REPLACE HARD-CODED VALUES!!!
         // int row = (hit.tick - 2400)/6;
         // int col = hit.targetwire[p];
+
+        if ( hit.size()<7 ) {
+          std::stringstream errmsg;
+          errmsg << "Error: Prong hit provided to larpid::interface::fillProngImagesFromReco size<7. " << std::endl;
+          errmsg << "Needs to be (x,y,z,tick,U-wire,V-wire,Y-wire)" << std::endl;
+          throw std::runtime_error(errmsg.str());
+        }
         
         float tick = hit[3];
         int row = (int)(tick - 2400)/6;
         int col = hit[4+p];
+
+        //std::cout << "fillProngImagesFromRecoAndKeepShowers - pixel=(" << row << "," << col << ")" << std::endl;
 
         float val = adc_v[p].pixel(row, col);
         float val_cosmic = thrumu_v[p].pixel(row, col);
