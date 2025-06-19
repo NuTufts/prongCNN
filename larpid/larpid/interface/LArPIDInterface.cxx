@@ -65,7 +65,7 @@ namespace interface {
           errmsg << "Error getting 2D UResNet track/shower results from " << uresnet_plane_name.str() << std::endl;
           throw std::runtime_error(errmsg.str());
         }
-        showerimg_v[p] = &(uresnet_v[p]->as_vector().at(1));
+        showerimg_v[p] = &(uresnet_v[p]->as_vector().at(0));
       }
     }
 
@@ -127,7 +127,7 @@ namespace interface {
 
       std::cout << "Make context image (with showers)" << std::endl;
       try {
-        fillContextImages(sparseimg_vv, threshold, adc_v, thrumu_v, imgBounds);
+        fillContextImagesAndKeepShowers(sparseimg_vv, threshold, adc_v, thrumu_v, showerimg_v, imgBounds);
       }
       catch (std::exception& e) {
         std::stringstream msg;
@@ -355,7 +355,7 @@ namespace interface {
     return;
   }
 
-  void fillContextImagesAndKeepImages(std::vector< std::vector<larpid::data::CropPixData_t> >& sparseimg_vv,
+  void fillContextImagesAndKeepShowers(std::vector< std::vector<larpid::data::CropPixData_t> >& sparseimg_vv,
                          const float& threshold,
                          const std::vector<larcv::Image2D>& adc_v,
                          const std::vector<larcv::Image2D>& thrumu_v,
